@@ -1,0 +1,120 @@
+<?xml version='1.0' encoding='utf-8'?>
+<interface version="1.2">
+  <object class="tk.Toplevel" id="main_window">
+    <property name="height">600</property>
+    <property name="title" translatable="yes">Tomodachi Life Resource Editor</property>
+    <property name="width">800</property>
+    <child>
+      <object class="ttk.Panedwindow" id="panedwindow2">
+        <property name="height">600</property>
+        <property name="orient">horizontal</property>
+        <property name="width">800</property>
+        <bind sequence="&lt;1&gt;" handler="callback_tree_select" add="" />
+        <layout manager="pack">
+          <property name="fill">both</property>
+          <property name="side">top</property>
+        </layout>
+        <child>
+          <object class="ttk.Panedwindow.Pane" id="left_pane">
+            <property name="weight">1</property>
+            <child>
+              <object class="pygubu.builder.widgets.scrollbarhelper" id="scrollbarhelper1">
+                <property name="scrolltype">both</property>
+                <property name="usemousewheel">false</property>
+                <layout manager="pack">
+                  <property name="side">top</property>
+                </layout>
+                <child>
+                  <object class="ttk.Treeview" id="file_tree">
+                    <property name="selectmode">browse</property>
+                    <bind sequence="&lt;&lt;TreeviewSelect&gt;&gt;" handler="callback_tree_select" add="" />
+                    <layout manager="pack">
+                      <property name="expand">true</property>
+                      <property name="fill">both</property>
+                      <property name="side">top</property>
+                    </layout>
+                    <child>
+                      <object class="ttk.Treeview.Column" id="column_name">
+                        <property name="column_anchor">w</property>
+                        <property name="heading_anchor">w</property>
+                        <property name="minwidth">200</property>
+                        <property name="stretch">true</property>
+                        <property name="text" translatable="yes">Name</property>
+                        <property name="tree_column">true</property>
+                        <property name="visible">true</property>
+                        <property name="width">200</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="ttk.Panedwindow.Pane" id="right_pane">
+            <property name="weight">1</property>
+            <child>
+              <object class="ttk.Notebook" id="tab_view_1">
+                <property name="height">200</property>
+                <property name="width">200</property>
+                <layout manager="pack">
+                  <property name="side">top</property>
+                </layout>
+                <child>
+                  <object class="ttk.Notebook.Tab" id="text_editor_tab">
+                    <property name="text" translatable="yes">Text Editor</property>
+                    <child>
+                      <object class="ttk.Frame" id="frame1">
+                        <property name="height">200</property>
+                        <property name="width">200</property>
+                        <layout manager="pack">
+                          <property name="side">top</property>
+                        </layout>
+                        <child>
+                          <object class="tk.Text" id="text_editor_text">
+                            <property name="height">10</property>
+                            <property name="width">50</property>
+                            <layout manager="pack">
+                              <property name="side">top</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="tk.Menu" id="menubar">
+    <child>
+      <object class="tk.Menuitem.Submenu" id="submenu_file">
+        <property name="accelerator">F</property>
+        <property name="columnbreak">false</property>
+        <property name="label" translatable="yes">File</property>
+        <property name="tearoff">false</property>
+        <child>
+          <object class="tk.Menuitem.Command" id="open_command">
+            <property name="command" type="command" cbtype="simple">callback_menu_open</property>
+            <property name="label" translatable="yes">Open</property>
+          </object>
+        </child>
+        <child>
+          <object class="tk.Menuitem.Command" id="command2">
+            <property name="label" translatable="yes">command2</property>
+          </object>
+        </child>
+        <child>
+          <object class="tk.Menuitem.Command" id="command3">
+            <property name="label" translatable="yes">command3</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>
