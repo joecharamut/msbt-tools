@@ -1,18 +1,25 @@
 import io
+import os
 from pathlib import Path
 from typing import Dict
 import struct
-from base64 import b64encode
+from base64 import b64encode, b64decode
 import argparse
 import enum
+import tempfile
 
 import lxml.etree
 import lxml.builder
+from lxml.etree import _Element as XMLElement
 
-import external.nlzss.lzss3 as lzss
-from external.darctool.darc import Darc
+import nlzss11
+
+# import external.nlzss.lzss3 as lzss
+# import external.nlzss.compress as lzc
+# from external.darctool.darc import Darc, DarcEntry
 
 from lib.msbt import Msbt
+from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
 
 
@@ -33,14 +40,18 @@ def guess_file_type(data: bytes) -> AutoFileType:
     return AutoFileType.UNKNOWN_FILE
 
 
+def replace_extension(file: str, ext: str) -> str:
+    return ".".join(file.split(".")[:-1]) + "." + ext
+
+
 def unpack_msg_bin(filename: str | Path) -> Dict[str, bytes]:
     with open(filename, "rb") as f:
-        message_bytes = lzss.decompress(f)
+        message_bytes = nlzss11.decompress(f.read())
     buf = io.BytesIO(message_bytes)
     arc = Darc.load(buf)
 
     files = {}
-    for entry in arc.flatentries:
+    for entry in arc.flat_entries:
         if "." in entry.fullpath:
             files[entry.fullpath] = entry.data
     return files
@@ -99,9 +110,9 @@ def handle_control_seq(buf: ByteBuffer) -> str:
         return "�"
 
 
-def msbt_to_xml(msbt: Msbt, path: str, parent: lxml.etree.ElementBase) -> None:
-    from lxml.etree import SubElement as SE
-    msbt_node = SE(parent, "MsbtFile", path=path)
+def msbt_to_xml(msbt: Msbt, path: str) -> XMLElement:
+    from lxml.etree import Element as E, SubElement as SE
+    msbt_node = E("MsbtFile", path=path)
 
     lbl1_node = SE(msbt_node, "Lbl1")
     for group, group_items in msbt.lbl1.items():
@@ -147,12 +158,14 @@ def msbt_to_xml(msbt: Msbt, path: str, parent: lxml.etree.ElementBase) -> None:
 
         print(f"string {str_idx} is {txt2_entry.text}")
 
+    return msbt_node
+
 
 def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
     files = {}
-    for entry in arc.flatentries:
-        if "." in entry.fullpath:
-            files[entry.fullpath] = entry.data
+    for entry in arc.flat_entries:
+        if "." in entry.full_path:
+            files[entry.full_path] = entry.data
 
     from lxml.etree import Element as E, SubElement as SE
     if compressed:
@@ -165,18 +178,35 @@ def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
         if file.endswith(".msbt") and False:
             print(f"processing msbt file !{file}")
             m = Msbt.from_bytes(data)
-            msbt_to_xml(m, file, container)
+            node = msbt_to_xml(m, file)
+            container.append(node)
         else:
             print(f"including file !{file} as raw data")
-            raw_data = SE(container, "RawDataFile", path=file, encoding="base64")
+            raw_data = SE(container, "RawDataFile", path=file)
             raw_data.text = b64encode(data).decode()
 
     return root
 
 
+def xml_to_darc(root: XMLElement, output: io.BytesIO) -> Darc:
+    arc = Darc()
+    for node in root:
+        node: XMLElement
+        if node.tag == "RawDataFile":
+            file_path = node.get("path")
+            file_data = b64decode(node.text)
+            arc.add_file(file_data, file_path[1:])
+        else:
+            print(f"tag {node.tag} not handled")
+
+    return arc
+
+
 def decompile_main(args: argparse.Namespace) -> int:
     in_file = args.input
     out_file = args.output
+    if not out_file:
+        out_file = replace_extension(in_file, "xml")
 
     with open(in_file, "rb") as f:
         in_data = f.read()
@@ -186,7 +216,7 @@ def decompile_main(args: argparse.Namespace) -> int:
     was_compressed = False
     if file_type == AutoFileType.LZ11_FILE:
         was_compressed = True
-        in_data = bytes(lzss.decompress_bytes(in_data))
+        in_data = bytes(nlzss11.decompress(in_data))
         file_type = guess_file_type(in_data)
 
     if file_type == AutoFileType.DARC_FILE:
@@ -194,16 +224,19 @@ def decompile_main(args: argparse.Namespace) -> int:
         arc = Darc.load(io.BytesIO(in_data))
         root = darc_to_xml(arc, was_compressed)
 
-        if not out_file:
-            out_file = ".".join(in_file.split(".")[:-1]) + ".xml"
-
+        print(f"writing {out_file}")
         with open(out_file, "wb") as f:
             f.write(lxml.etree.tostring(root, pretty_print=True, encoding="utf-8"))
         return 0
 
     if file_type == AutoFileType.MSBT_FILE:
-        print("cant do msbt file alone")
-        return 1
+        print("msbt file")
+        msbt = Msbt.from_bytes(in_data, True)
+        root = msbt_to_xml(msbt, in_file.split("/")[-1])
+
+        with open(out_file, "wb") as f:
+            f.write(lxml.etree.tostring(root, pretty_print=True, encoding="utf-8"))
+        return 0
 
     print("Unsupported file format")
     return 1
@@ -216,24 +249,36 @@ def recompile_main(args: argparse.Namespace) -> int:
     output_buffer = io.BytesIO()
 
     with open(in_file, "rb") as f:
-        root: lxml.etree._Element = lxml.etree.parse(f).getroot()
+        root: XMLElement = lxml.etree.parse(f).getroot()
 
     is_compressed = False
     if root.tag == "LZ11":
         is_compressed = True
-        root = root[0]  # pop off the outer layer
+        root = root[0]  # pop off the outer layer and flag for compression later
 
-    is_darc = False
     if root.tag == "DarcContainer":
-        is_darc = True
+        arc = xml_to_darc(root, output_buffer)
+        arc.list()
+        with tempfile.NamedTemporaryFile() as tf:
+            arc.save(tf.name)
+            tf.seek(0, os.SEEK_SET)
+            output_buffer.write(tf.read())
 
 
-    print(lxml.etree.tostring(root))
+    # print(lxml.etree.tostring(root))
 
     if is_compressed:
-        lzss.pack()
+        compressed_out = io.BytesIO()
+        compressed_out.write(nlzss11.compress(output_buffer.getvalue(), 6))
+        output_buffer = compressed_out
 
-    return 1
+    if not out_file:
+        out_file = replace_extension(in_file, "new.bin")
+
+    with open(out_file, "wb") as f:
+        f.write(output_buffer.getvalue())
+
+    return 0
 
 
 def main() -> None:
@@ -256,13 +301,15 @@ def main() -> None:
 
     from lxml.etree import Element as E, SubElement as SE
     container = E("DarcContainer")
+    container: XMLElement
 
     for container_file, entries in unpacked_files.items():
         for file, data in entries.items():
             if file.endswith(".msbt") and False:
                 print(f"processing msbt file {container_file}!{file}")
                 m = Msbt.from_bytes(data)
-                msbt_to_xml(m, file, container)
+                node = msbt_to_xml(m, file)
+                container.append(node)
             else:
                 print(f"including file {container_file}!{file} as raw data")
                 raw_data = SE(container, "RawDataFile", path=file, encoding="base64")
