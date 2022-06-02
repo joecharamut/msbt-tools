@@ -6,7 +6,6 @@ import struct
 from base64 import b64encode, b64decode
 import argparse
 import enum
-import tempfile
 
 import lxml.etree
 import lxml.builder
@@ -19,7 +18,7 @@ import nlzss11
 # from external.darctool.darc import Darc, DarcEntry
 
 from lib.msbt import Msbt
-from lib.darc import Darc, DarcEntry
+from lib.new_darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
 
 
@@ -47,13 +46,12 @@ def replace_extension(file: str, ext: str) -> str:
 def unpack_msg_bin(filename: str | Path) -> Dict[str, bytes]:
     with open(filename, "rb") as f:
         message_bytes = nlzss11.decompress(f.read())
-    buf = io.BytesIO(message_bytes)
-    arc = Darc.load(buf)
+    arc = Darc.from_bytes(message_bytes)
 
     files = {}
-    for entry in arc.flat_entries:
-        if "." in entry.fullpath:
-            files[entry.fullpath] = entry.data
+    for entry in arc.root_entry.flat_tree():
+        if not entry.is_dir:
+            files[entry.filepath] = entry.data
     return files
 
 
@@ -163,9 +161,9 @@ def msbt_to_xml(msbt: Msbt, path: str) -> XMLElement:
 
 def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
     files = {}
-    for entry in arc.flat_entries:
-        if "." in entry.full_path:
-            files[entry.full_path] = entry.data
+    for entry in arc.root_entry.flat_tree():
+        if not entry.is_dir:
+            files[entry.filepath] = entry.data
 
     from lxml.etree import Element as E, SubElement as SE
     if compressed:
@@ -221,7 +219,7 @@ def decompile_main(args: argparse.Namespace) -> int:
 
     if file_type == AutoFileType.DARC_FILE:
         print("darc file")
-        arc = Darc.load(io.BytesIO(in_data))
+        arc = Darc.from_bytes(in_data)
         root = darc_to_xml(arc, was_compressed)
 
         print(f"writing {out_file}")
@@ -258,12 +256,7 @@ def recompile_main(args: argparse.Namespace) -> int:
 
     if root.tag == "DarcContainer":
         arc = xml_to_darc(root, output_buffer)
-        arc.list()
-        with tempfile.NamedTemporaryFile() as tf:
-            arc.save(tf.name)
-            tf.seek(0, os.SEEK_SET)
-            output_buffer.write(tf.read())
-
+        output_buffer.write(arc.to_bytes())
 
     # print(lxml.etree.tostring(root))
 

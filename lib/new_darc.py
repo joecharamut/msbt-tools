@@ -4,8 +4,6 @@ import struct
 from typing import NamedTuple, List, Optional, Generator, Any
 from collections import namedtuple
 
-import hexdump
-
 # darc format reference:
 #   http://web.archive.org/web/20211123124701/http://problemkaputt.de/gbatek-3ds-files-archive-darc.htm
 
@@ -84,7 +82,7 @@ class DarcEntry:
         self._children.remove(child)
 
     @property
-    def filename(self) -> str:
+    def filepath(self) -> str:
         stack = []
         node: Optional[DarcEntry] = self
         while node is not None:
@@ -176,7 +174,7 @@ class Darc:
         ))
 
         name_table = io.BytesIO()
-        filename_to_index = {None: 0, self.root_entry.filename: 0}
+        filename_to_index = {None: 0, self.root_entry.filepath: 0}
         i = 0
         for e in self.root_entry.flat_tree():
             name_offset = name_table.tell()
@@ -186,11 +184,11 @@ class Darc:
             buf.write(struct.pack(
                 Darc.FILE_TABLE_ENTRY.format(self.byte_order.struct),
                 name_offset | (0x01000000 if e.is_dir else 0),
-                filename_to_index[e.parent.filename if e.parent else None] if e.is_dir else 0,
+                filename_to_index[e.parent.filepath if e.parent else None] if e.is_dir else 0,
                 i + e.dir_entry_size() if e.is_dir else e.length,
             ))
 
-            filename_to_index[e.filename] = i
+            filename_to_index[e.filepath] = i
 
             i += 1
 
@@ -232,7 +230,7 @@ class Darc:
             # seek to file table
             buf.seek(0x1C, os.SEEK_SET)
             # entry of this file
-            buf.seek(0xC*filename_to_index[e.filename], os.SEEK_CUR)
+            buf.seek(0xC * filename_to_index[e.filepath], os.SEEK_CUR)
             # first u32 is name offset
             buf.seek(0x4, os.SEEK_CUR)
             # write entry data
@@ -264,6 +262,8 @@ class Darc:
             byte_order = ByteOrder.LITTLE_ENDIAN
         elif bom == b"\xFE\xFF":
             byte_order = ByteOrder.BIG_ENDIAN
+        else:
+            print("Warning: Darc file has invalid endian marker (defaulting to little endian)")
 
         header_len, version, file_size, file_tab_off, file_tab_len, file_dat_off = \
             struct.unpack(Darc.HEADER_STRUCT.format(byte_order.struct), f.read(22))
@@ -312,7 +312,7 @@ class Darc:
                 f.seek(file_offset, os.SEEK_SET)
                 entry.data = f.read(length)
 
-                testing_list.append((file_offset, entry.filename))
+                testing_list.append((file_offset, entry.filepath))
             else:
                 directory_stack.append(StackItem(entry, length - 1))
 
@@ -356,8 +356,6 @@ def test() -> None:
     print("double indirection works")
 
     print("IT WORKED??????")
-
-
 
 
 if __name__ == "__main__":
