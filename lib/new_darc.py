@@ -335,33 +335,3 @@ class Darc:
 
         node.add_child(file_entry)
         return file_entry
-
-
-def test() -> None:
-    with open("/home/joseph/Documents/tomodachi_life/workspaces/scripts/test/Game_US_English.bin", "rb") as f:
-        fb = f.read()
-
-    arc = Darc.from_bytes(fb)
-
-    with open("/home/joseph/Documents/tomodachi_life/workspaces/scripts/test/test.bin", "wb") as f:
-        f.write(arc.to_bytes())
-    os.system("xxd /home/joseph/Documents/tomodachi_life/workspaces/scripts/test/test.bin > /home/joseph/Documents/tomodachi_life/workspaces/scripts/test/test.hex")
-
-    print(flush=True)
-
-    nb = arc.to_bytes()
-
-    assert len(nb) == len(fb)
-    print("lengths match")
-
-    assert nb == fb
-    print("files match")
-
-    assert nb == Darc.from_bytes(nb).to_bytes()
-    print("double indirection works")
-
-    print("IT WORKED??????")
-
-
-if __name__ == "__main__":
-    test()
