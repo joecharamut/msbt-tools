@@ -153,7 +153,7 @@ class Darc:
 
     def __init__(self, byte_order=ByteOrder.LITTLE_ENDIAN) -> None:
         self.byte_order = byte_order
-        self.root_entry = DarcEntry("")
+        self._root_entry = DarcEntry("", is_dir=True)
 
     def to_bytes(self) -> bytes:
         buf = io.BytesIO()
@@ -174,9 +174,9 @@ class Darc:
         ))
 
         name_table = io.BytesIO()
-        filename_to_index = {None: 0, self.root_entry.filepath: 0}
+        filename_to_index = {None: 0, self._root_entry.filepath: 0}
         i = 0
-        for e in self.root_entry.flat_tree():
+        for e in self._root_entry.flat_tree():
             name_offset = name_table.tell()
             name_table.write(e.name.encode(self.byte_order.wchar))
             name_table.write(b"\x00\x00")
@@ -191,8 +191,6 @@ class Darc:
             filename_to_index[e.filepath] = i
 
             i += 1
-
-        # print(filename_to_index)
 
         # write out name table at end of file headers
         buf.write(name_table.getvalue())
@@ -215,12 +213,9 @@ class Darc:
         buf.write(self.byte_order.pack("I", file_data_start))
         buf.seek(file_data_start, os.SEEK_SET)
 
-        for e in self.root_entry.breadth_tree():
+        for e in self._root_entry.breadth_tree():
             if e.is_dir:
                 continue
-
-            # print(f"writing file {e.filename} (idx {filename_to_index[e.filename]})")
-            # print(f"{hex(buf.tell())} -> {hexdump.hexdump(e.data[0:16], 'return')}")
 
             align(buf)
             file_pos = buf.tell()
@@ -271,10 +266,6 @@ class Darc:
         if version != Darc.DARC_VERSION:
             raise TypeError(f"Unsupported version: expected {hex(Darc.DARC_VERSION)} got {hex(version)}")
 
-        # print(hex(version))
-        # print(f"file table offset is {hex(file_tab_off)}")
-        # print(f"file table is {hex(file_tab_len)} bytes long ({file_tab_len // 12} entries)")
-
         # read root entry
         _, _, end_index = struct.unpack(Darc.FILE_TABLE_ENTRY.format(byte_order.struct), f.read(12))
         root = DarcEntry("", is_dir=True)
@@ -284,12 +275,10 @@ class Darc:
             raw_file_table.append(struct.unpack(Darc.FILE_TABLE_ENTRY.format(byte_order.struct), f.read(12)))
 
         name_table_start = f.tell()
-        # print(f"name table offset is {hex(name_table_start)}")
 
         # dir, end
         StackItem = namedtuple("StackItem", "node end")
         directory_stack = [StackItem(root, end_index)]
-        testing_list = []
         for i, (name_offset, file_offset, length) in enumerate(raw_file_table):
             if directory_stack[-1].end == i:
                 # at end index
@@ -311,25 +300,41 @@ class Darc:
                 # read file content
                 f.seek(file_offset, os.SEEK_SET)
                 entry.data = f.read(length)
-
-                testing_list.append((file_offset, entry.filepath))
             else:
                 directory_stack.append(StackItem(entry, length - 1))
 
-            # print(name)
-            # print(is_dir, name_offset, file_offset, length)
-
-        # print(testing_list)
-        # print(root)
-        # root.dump()
-
-        # for n in root.children():
-        #     print(n)
-
         arc = Darc(byte_order)
-        arc.root_entry = root
+        arc._root_entry = root
 
         return arc
+
+    def entries(self) -> Generator[DarcEntry, None, None]:
+        yield from self._root_entry.flat_tree()
+
+    def add_file(self, path: str, data: bytes) -> DarcEntry:
+        split = path.split("/")
+
+        file_entry = DarcEntry(split.pop(), is_dir=False)
+        file_entry.data = data
+
+        node = None
+        if split[0] == "":
+            split.pop(0)
+            node = self._root_entry
+
+        while split:
+            dir_name = split.pop(0)
+            for c in node.children:
+                if c.is_dir and c.name == dir_name:
+                    node = c
+                    break
+            else:
+                new_dir = DarcEntry(dir_name, is_dir=True)
+                node.add_child(new_dir)
+                node = new_dir
+
+        node.add_child(file_entry)
+        return file_entry
 
 
 def test() -> None:

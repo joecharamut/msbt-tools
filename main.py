@@ -49,7 +49,7 @@ def unpack_msg_bin(filename: str | Path) -> Dict[str, bytes]:
     arc = Darc.from_bytes(message_bytes)
 
     files = {}
-    for entry in arc.root_entry.flat_tree():
+    for entry in arc.entries():
         if not entry.is_dir:
             files[entry.filepath] = entry.data
     return files
@@ -161,7 +161,7 @@ def msbt_to_xml(msbt: Msbt, path: str) -> XMLElement:
 
 def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
     files = {}
-    for entry in arc.root_entry.flat_tree():
+    for entry in arc.entries():
         if not entry.is_dir:
             files[entry.filepath] = entry.data
 
@@ -193,7 +193,7 @@ def xml_to_darc(root: XMLElement, output: io.BytesIO) -> Darc:
         if node.tag == "RawDataFile":
             file_path = node.get("path")
             file_data = b64decode(node.text)
-            arc.add_file(file_data, file_path[1:])
+            arc.add_file(file_path, file_data)
         else:
             print(f"tag {node.tag} not handled")
 
