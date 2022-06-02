@@ -322,7 +322,7 @@ class Darc:
             split.pop(0)
             node = self._root_entry
 
-        while split:
+        while split and node:
             dir_name = split.pop(0)
             for c in node.children:
                 if c.is_dir and c.name == dir_name:
@@ -332,6 +332,9 @@ class Darc:
                 new_dir = DarcEntry(dir_name, is_dir=True)
                 node.add_child(new_dir)
                 node = new_dir
+
+        if not node:
+            raise RuntimeError("Error finding parent node for file (this should never happen)")
 
         node.add_child(file_entry)
         return file_entry
