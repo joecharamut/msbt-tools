@@ -148,8 +148,8 @@ class Darc:
     DARC_VERSION = 0x1000000
 
     IDENT_STRUCT = "4s 2s"  # b"darc" and BOM
-    HEADER_STRUCT = "{} H I I I I I"  # endian dependant fields
-    FILE_TABLE_ENTRY = "{} I I I"
+    HEADER_STRUCT = "H I I I I I"  # endian dependant fields
+    FILE_TABLE_ENTRY = "I I I"
 
     def __init__(self, byte_order=ByteOrder.LITTLE_ENDIAN) -> None:
         self.byte_order = byte_order
@@ -163,8 +163,8 @@ class Darc:
         buf.write(self.byte_order.bom)
 
         # write header
-        buf.write(struct.pack(
-            Darc.HEADER_STRUCT.format(self.byte_order.struct),
+        buf.write(self.byte_order.pack(
+            Darc.HEADER_STRUCT,
             0x1C,               # header length
             Darc.DARC_VERSION,  # version
             0xFFFFFFFF,         # file length
@@ -181,8 +181,8 @@ class Darc:
             name_table.write(e.name.encode(self.byte_order.wchar))
             name_table.write(b"\x00\x00")
 
-            buf.write(struct.pack(
-                Darc.FILE_TABLE_ENTRY.format(self.byte_order.struct),
+            buf.write(self.byte_order.pack(
+                Darc.FILE_TABLE_ENTRY,
                 name_offset | (0x01000000 if e.is_dir else 0),
                 filename_to_index[e.parent.filepath if e.parent else None] if e.is_dir else 0,
                 i + e.dir_entry_size() if e.is_dir else e.length,
@@ -198,7 +198,7 @@ class Darc:
         name_table_end = buf.tell()
         file_table_length = name_table_end - 0x1C
         buf.seek(0x14, os.SEEK_SET)
-        buf.write(struct.pack(f"{self.byte_order.struct} I", file_table_length))
+        buf.write(self.byte_order.pack("I", file_table_length))
         buf.seek(name_table_end, os.SEEK_SET)
 
         def align(b: io.BytesIO):
@@ -229,8 +229,8 @@ class Darc:
             # first u32 is name offset
             buf.seek(0x4, os.SEEK_CUR)
             # write entry data
-            buf.write(struct.pack(f"{self.byte_order.struct} I", file_pos))
-            buf.write(struct.pack(f"{self.byte_order.struct} I", e.length))
+            buf.write(self.byte_order.pack("I", file_pos))
+            buf.write(self.byte_order.pack("I", e.length))
 
             # seek back
             buf.seek(file_end, os.SEEK_SET)
@@ -261,18 +261,18 @@ class Darc:
             print("Warning: Darc file has invalid endian marker (defaulting to little endian)")
 
         header_len, version, file_size, file_tab_off, file_tab_len, file_dat_off = \
-            struct.unpack(Darc.HEADER_STRUCT.format(byte_order.struct), f.read(22))
+            byte_order.unpack(Darc.HEADER_STRUCT, f.read(22))
 
         if version != Darc.DARC_VERSION:
             raise TypeError(f"Unsupported version: expected {hex(Darc.DARC_VERSION)} got {hex(version)}")
 
         # read root entry
-        _, _, end_index = struct.unpack(Darc.FILE_TABLE_ENTRY.format(byte_order.struct), f.read(12))
+        _, _, end_index = byte_order.unpack(Darc.FILE_TABLE_ENTRY, f.read(12))
         root = DarcEntry("", is_dir=True)
 
         raw_file_table = []
         for _ in range(end_index - 1):
-            raw_file_table.append(struct.unpack(Darc.FILE_TABLE_ENTRY.format(byte_order.struct), f.read(12)))
+            raw_file_table.append(byte_order.unpack(Darc.FILE_TABLE_ENTRY, f.read(12)))
 
         name_table_start = f.tell()
 
