@@ -14,7 +14,7 @@ from lxml.etree import _Element as XMLElement
 import nlzss11
 
 from lib.msbt import Msbt
-from lib.new_darc import Darc, DarcEntry
+from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
 
 
