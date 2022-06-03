@@ -13,10 +13,6 @@ from lxml.etree import _Element as XMLElement
 
 import nlzss11
 
-# import external.nlzss.lzss3 as lzss
-# import external.nlzss.compress as lzc
-# from external.darctool.darc import Darc, DarcEntry
-
 from lib.msbt import Msbt
 from lib.new_darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer

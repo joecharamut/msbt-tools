@@ -4,24 +4,10 @@ import struct
 from typing import NamedTuple, List, Optional, Generator, Any
 from collections import namedtuple
 
+from lib.byteorder import ByteOrder
+
 # darc format reference:
 #   http://web.archive.org/web/20211123124701/http://problemkaputt.de/gbatek-3ds-files-archive-darc.htm
-
-
-class ByteOrder:
-    class Order(NamedTuple):
-        struct: str
-        wchar: str
-        bom: bytes
-
-        def pack(self, fmt: str, *args: Any) -> bytes:
-            return struct.pack(self.struct + fmt, *args)
-
-        def unpack(self, fmt: str, buffer: bytes) -> tuple:
-            return struct.unpack(self.struct + fmt, buffer)
-
-    LITTLE_ENDIAN = Order("<", "utf-16-le", b"\xFF\xFE")
-    BIG_ENDIAN = Order(">", "utf-16-be", b"\xFE\xFF")
 
 
 class DarcEntry:
