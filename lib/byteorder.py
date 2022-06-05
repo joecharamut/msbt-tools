@@ -1,16 +1,18 @@
 import struct
-from typing import NamedTuple, Any
+from typing import NamedTuple, Any, Optional
 
 
-class _ByteOrder:
+class ByteOrderType:
     struct: str
     wchar: str
     bom: bytes
+    suffix: str
 
-    def __init__(self, struct_fmt: str, wchar: str, bom: bytes) -> None:
+    def __init__(self, struct_fmt: str, wchar: str, bom: bytes, suffix: str) -> None:
         self.struct = struct_fmt
         self.wchar = wchar
         self.bom = bom
+        self.suffix = suffix
 
     def pack(self, fmt: str, *args: Any) -> bytes:
         return struct.pack(self.struct + fmt, *args)
@@ -26,6 +28,15 @@ class _ByteOrder:
 
 
 class ByteOrder:
-    LITTLE_ENDIAN = _ByteOrder("<", "utf-16-le", b"\xFF\xFE")
-    BIG_ENDIAN = _ByteOrder(">", "utf-16-be", b"\xFE\xFF")
+    LITTLE_ENDIAN = ByteOrderType("<", "utf-16-le", b"\xFF\xFE", "le")
+    BIG_ENDIAN = ByteOrderType(">", "utf-16-be", b"\xFE\xFF", "be")
 
+    @staticmethod
+    def from_bom(bom: bytes, default: Optional[ByteOrderType] = None) -> ByteOrderType:
+        if bom == b"\xFF\xFE":
+            return ByteOrder.LITTLE_ENDIAN
+        if bom == b"\xFE\xFF":
+            return ByteOrder.BIG_ENDIAN
+        if default:
+            return default
+        raise ValueError("Invalid BOM, or no default specified")

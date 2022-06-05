@@ -13,6 +13,7 @@ from lxml.etree import _Element as XMLElement
 
 import nlzss11
 
+from lib.lms import Msbp
 from lib.msbt import Msbt
 from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
@@ -21,6 +22,8 @@ from lib.buffer import ByteBuffer
 class AutoFileType(enum.Enum):
     UNKNOWN_FILE = enum.auto()
     MSBT_FILE = enum.auto()
+    MSBP_FILE = enum.auto()
+    MSBF_FILE = enum.auto()
     DARC_FILE = enum.auto()
     LZ11_FILE = enum.auto()
 
@@ -32,23 +35,15 @@ def guess_file_type(data: bytes) -> AutoFileType:
         return AutoFileType.DARC_FILE
     if data[0:8] == b"MsgStdBn":
         return AutoFileType.MSBT_FILE
+    if data[0:8] == b"MsgPrjBn":
+        return AutoFileType.MSBP_FILE
+    if data[0:8] == b"MsgFlwBn":
+        return AutoFileType.MSBF_FILE
     return AutoFileType.UNKNOWN_FILE
 
 
 def replace_extension(file: str, ext: str) -> str:
     return ".".join(file.split(".")[:-1]) + "." + ext
-
-
-def unpack_msg_bin(filename: str | Path) -> Dict[str, bytes]:
-    with open(filename, "rb") as f:
-        message_bytes = nlzss11.decompress(f.read())
-    arc = Darc.from_bytes(message_bytes)
-
-    files = {}
-    for entry in arc.entries():
-        if not entry.is_dir:
-            files[entry.filepath] = entry.data
-    return files
 
 
 def handle_control_seq(buf: ByteBuffer) -> str:
@@ -169,11 +164,15 @@ def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
         root = container = E("DarcContainer")
 
     for file, data in files.items():
-        if file.endswith(".msbt") and False:
+        if file.endswith(".msbt") and 1 == 2:
             print(f"processing msbt file !{file}")
             m = Msbt.from_bytes(data)
             node = msbt_to_xml(m, file)
             container.append(node)
+        elif file.endswith(".msbp"):
+            print(f"processing msbp file !{file}")
+            p = Msbp.from_bytes(data)
+            exit(1)
         else:
             print(f"including file !{file} as raw data")
             raw_data = SE(container, "RawDataFile", path=file)
@@ -280,32 +279,26 @@ def main() -> None:
     unpacked_files = {}
     total = 0
     for i, f in enumerate(message_files):
-        if "Talk_US_English_LZ.bin" not in str(f):
-            continue
         print(f"\rLoading archive {i+1}/{len(message_files)}", end="", flush=True)
-        unpacked_files[f] = unpack_msg_bin(f)
+
+        with open(f, "rb") as file:
+            data = nlzss11.decompress(file.read())
+        arc = Darc.from_bytes(data)
+        files = {e.filepath: e.data for e in [e for e in arc.entries() if not e.is_dir]}
+
+        unpacked_files[f] = files
         total += len(unpacked_files[f])
-        break
-    print(f"\nTotal entries: {total}")
+    print(f"\nTotal files: {total}")
 
-    from lxml.etree import Element as E, SubElement as SE
-    container = E("DarcContainer")
-    container: XMLElement
-
+    exts = {}
     for container_file, entries in unpacked_files.items():
         for file, data in entries.items():
-            if file.endswith(".msbt") and False:
-                print(f"processing msbt file {container_file}!{file}")
-                m = Msbt.from_bytes(data)
-                node = msbt_to_xml(m, file)
-                container.append(node)
-            else:
-                print(f"including file {container_file}!{file} as raw data")
-                raw_data = SE(container, "RawDataFile", path=file, encoding="base64")
-                raw_data.text = b64encode(data).decode()
+            ext = file.split(".")[-1]
+            if ext not in exts:
+                exts[ext] = 0
+            exts[ext] += 1
 
-    with open("test/out.xml", "wb") as f:
-        f.write(lxml.etree.tostring(container, pretty_print=True, encoding="utf-8"))
+    print(exts)
 
 
 def main_args() -> int:
