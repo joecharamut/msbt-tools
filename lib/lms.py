@@ -29,6 +29,26 @@ def read_str(f: typing.BinaryIO, encoding: str, length: int = -1) -> str:
         return f.read(length * width).decode(encoding)
 
 
+def interpret_blocks(types: Dict[str, Type["LMSBlock"]], lms_file: "LMSFile") -> Dict[str, "LMSBlock"]:
+    unpacked_sections: Dict[str, LMSBlock] = {}
+    for block_type, data in lms_file.blocks.items():
+        if block_type not in types:
+            raise RuntimeError(f"Unhandled block type: {block_type}")
+
+        b = types[block_type].from_bytes(data, lms_file)
+
+        try:
+            assert b.to_bytes() == data
+            print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
+        except AssertionError:
+            print(f"[✗] {block_type} (assert failed)")
+        except NotImplementedError:
+            print(f"[✗] {block_type} (not implemented)")
+
+        unpacked_sections[block_type] = b
+    return unpacked_sections
+
+
 class LMSBlock(ABC):
     @staticmethod
     @abstractmethod
@@ -582,8 +602,7 @@ class ATR1Block(LMSBlock):
                 for i in range(0, len(attr), 4):
                     val, = lms_file.byte_order.unpack("I", buf.read(4))
                     if val in offs:
-                        # print(f"possible string: attr offset {hex(i)}={val} => {offs[val]!r}")
-                        pass
+                        print(f"possible string: attr offset {hex(i)}={val} => {offs[val]!r}")
 
         blk = ATR1Block()
         blk.byte_order = lms_file.byte_order
@@ -594,7 +613,6 @@ class ATR1Block(LMSBlock):
 
     def to_bytes(self) -> bytes:
         return self.data
-
 # End of MSBT file blocks
 
 
@@ -661,9 +679,6 @@ class LMSProjectFile:
     def __init__(self) -> None:
         ...
 
-    def to_bytes(self) -> bytes:
-        ...
-
     @staticmethod
     def from_bytes(data: bytes) -> "LMSProjectFile":
         lms = LMSFile.from_bytes(data)
@@ -686,34 +701,22 @@ class LMSProjectFile:
             "CTI1": CTI1Block,
         }
 
-        unpacked_sections: Dict[str, LMSBlock] = {}
-        for block_type, data in lms.blocks.items():
-            if block_type not in section_types:
-                raise RuntimeError(f"Unhandled block type: {block_type}")
-
-            b = section_types[block_type].from_bytes(data, lms)
-
-            try:
-                assert b.to_bytes() == data
-                print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
-            except AssertionError:
-                print(f"[✗] {block_type} (assert failed)")
-            except NotImplementedError:
-                print(f"[✗] {block_type} (not implemented)")
-
-            unpacked_sections[block_type] = b
-
+        unpacked_sections = interpret_blocks(section_types, lms)
         for k, v in unpacked_sections.items():
             print(f"{k}: {v!r}")
+
+        # todo: copy in blocks
+        prj = LMSProjectFile()
+        return prj
+
+    def to_bytes(self) -> bytes:
+        ...
 
 
 class LMSStandardFile:
     MAGIC = b"MsgStdBn"
 
     def __init__(self) -> None:
-        ...
-
-    def to_bytes(self) -> bytes:
         ...
 
     @staticmethod
@@ -729,22 +732,13 @@ class LMSStandardFile:
             "TXT2": TXT2Block,
         }
 
-        unpacked_sections: Dict[str, LMSBlock] = {}
-        for block_type, data in lms.blocks.items():
-            if block_type not in section_types:
-                raise RuntimeError(f"Unhandled block type: {block_type}")
-
-            b = section_types[block_type].from_bytes(data, lms)
-
-            try:
-                assert b.to_bytes() == data
-                print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
-            except AssertionError:
-                print(f"[✗] {block_type} (assert failed)")
-            except NotImplementedError:
-                print(f"[✗] {block_type} (not implemented)")
-
-            unpacked_sections[block_type] = b
-
+        unpacked_sections = interpret_blocks(section_types, lms)
         for k, v in unpacked_sections.items():
             print(f"{k}: {v!r}")
+
+        # todo: copy in blocks
+        msg = LMSStandardFile()
+        return msg
+
+    def to_bytes(self) -> bytes:
+        ...
