@@ -269,7 +269,7 @@ def recompile_main(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> None:
+def test_main() -> int:
     message_files = []
     messages_path = Path("/home/joseph/Documents/tomodachi_life/romfs/message")
     for mdir in messages_path.iterdir():
@@ -291,14 +291,27 @@ def main() -> None:
     print(f"\nTotal files: {total}")
 
     exts = {}
+    files = {}
     for container_file, entries in unpacked_files.items():
         for file, data in entries.items():
             ext = file.split(".")[-1]
             if ext not in exts:
                 exts[ext] = 0
+            if ext not in files:
+                files[ext] = []
+
             exts[ext] += 1
+            files[ext].append((file, data))
 
     print(exts)
+
+    for file, data in files["msbp"]:
+        print(f"processing msbp file !{file}")
+        p = LMSProjectFile.from_bytes(data)
+        # input("press a key")
+        print()
+
+    return 0
 
 
 def main_args() -> int:
@@ -328,4 +341,5 @@ def main_args() -> int:
 
 
 if __name__ == "__main__":
+    exit(test_main())
     exit(main_args())

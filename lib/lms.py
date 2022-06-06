@@ -172,6 +172,52 @@ class ATI2Block(LMSBlock):
         return f.getvalue()
 
 
+class ALI2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8"):
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.lists = []
+
+    def __repr__(self) -> str:
+        return f"<ALI2Block lists={self.lists!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "ALI2Block":
+        f = io.BytesIO(data)
+
+        lists = []
+        num_lists, = lms_file.byte_order.unpack("I", f.read(4))
+        for _ in range(num_lists):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+
+            names = []
+            list_base = f.tell()
+            list_items, = lms_file.byte_order.unpack("I", f.read(4))
+            for _ in range(list_items):
+                name_offset, = lms_file.byte_order.unpack("I", f.read(4))
+                pos2 = f.tell()
+
+                f.seek(list_base + name_offset, os.SEEK_SET)
+                name = read_str(f, lms_file.encoding)
+
+                names.append(name)
+                f.seek(pos2, os.SEEK_SET)
+
+            lists.append(names)
+            f.seek(pos, os.SEEK_SET)
+
+        blk = ALI2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.lists = lists
+        return blk
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError
+
+
 class TGG2Block(LMSBlock):
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
@@ -298,10 +344,10 @@ class TGL2Block(LMSBlock):
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8"):
         self.byte_order = byte_order
         self.encoding = encoding
-        self.lists = []
+        self.names = []
 
     def __repr__(self) -> str:
-        return f"<TGL2Block lists={self.lists!r}>"
+        return f"<TGL2Block names={self.names!r}>"
 
     @staticmethod
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGL2Block":
@@ -320,18 +366,18 @@ class TGL2Block(LMSBlock):
         blk = TGL2Block()
         blk.byte_order = lms_file.byte_order
         blk.encoding = lms_file.encoding
-        blk.lists = names
+        blk.names = names
         return blk
 
     def to_bytes(self) -> bytes:
         f = io.BytesIO()
 
-        f.write(self.byte_order.pack("H 2x", len(self.lists)))
+        f.write(self.byte_order.pack("H 2x", len(self.names)))
 
         # reserve space for offsets
-        f.write(b"\x00"*4*len(self.lists))
+        f.write(b"\x00" * 4 * len(self.names))
 
-        for i, name in enumerate(self.lists):
+        for i, name in enumerate(self.names):
             pos = f.tell()
             f.seek(4 + (4 * i), os.SEEK_SET)
             f.write(self.byte_order.pack("I", pos))
@@ -343,7 +389,7 @@ class TGL2Block(LMSBlock):
 
 
 class SYL3Block(LMSBlock):
-    STYLE_STRUCT = "IIIi"
+    STYLE_STRUCT = "IIii"
 
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN) -> None:
         self.byte_order = byte_order
@@ -508,7 +554,7 @@ class LMSProjectFile:
             "CLB1": HashTableBlock,
             "ATI2": ATI2Block,
             "ALB1": HashTableBlock,
-            "ALI2": UnknownBlock,
+            "ALI2": ALI2Block,
             "TGG2": TGG2Block,
             "TAG2": TAG2Block,
             "TGP2": TGP2Block,
@@ -522,12 +568,18 @@ class LMSProjectFile:
         for block_type, data in lms.blocks.items():
             if block_type not in section_types:
                 raise RuntimeError(f"Unhandled block type: {block_type}")
-            unpacked_sections[block_type] = section_types[block_type].from_bytes(data, lms)
+
+            b = section_types[block_type].from_bytes(data, lms)
+
+            try:
+                assert b.to_bytes() == data
+                print(f"[✓] {block_type}")
+            except AssertionError:
+                print(f"[✗] {block_type} (assert failed)")
+            except NotImplementedError:
+                print(f"[✗] {block_type} (not implemented)")
+
+            unpacked_sections[block_type] = b
 
         for k, v in unpacked_sections.items():
             print(f"{k}: {v!r}")
-
-        assert unpacked_sections["CLR1"].to_bytes() == lms.blocks["CLR1"]
-        assert unpacked_sections["SYL3"].to_bytes() == lms.blocks["SYL3"]
-        assert unpacked_sections["TGL2"].to_bytes() == lms.blocks["TGL2"]
-        assert unpacked_sections["CTI1"].to_bytes() == lms.blocks["CTI1"]
