@@ -18,6 +18,10 @@ def read_char(f: typing.BinaryIO, encoding: str) -> str:
     return f.read(width).decode(encoding)
 
 
+def write_char(f: typing.BinaryIO, encoding: str, ch: str) -> int:
+    return f.write(ch.encode(encoding))
+
+
 class LMSBlock(ABC):
     @staticmethod
     @abstractmethod
@@ -156,6 +160,58 @@ class ATI2Block(LMSBlock):
         return f.getvalue()
 
 
+class CTI1Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8"):
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.filenames = []
+
+    def __repr__(self) -> str:
+        return f"<CTI1Block filenames={self.filenames!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "CTI1Block":
+        f = io.BytesIO(data)
+
+        filenames = []
+        num_filenames, = lms_file.byte_order.unpack("I", f.read(4))
+        for _ in range(num_filenames):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            name = ""
+            f.seek(offset, os.SEEK_SET)
+
+            while (ch := read_char(f, lms_file.encoding)) != "\0":
+                name += ch
+
+            filenames.append(name)
+            f.seek(pos, os.SEEK_SET)
+
+        blk = CTI1Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.filenames = filenames
+        return blk
+
+    def to_bytes(self) -> bytes:
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("I", len(self.filenames)))
+
+        # reserve space for offsets
+        f.write(b"\x00"*4*len(self.filenames))
+
+        for i, name in enumerate(self.filenames):
+            pos = f.tell()
+            f.seek(4 + (4 * i), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", pos))
+            f.seek(pos, os.SEEK_SET)
+            f.write(name.encode(self.encoding))
+            f.write(b"\x00")
+
+        return f.getvalue()
+
+
 class LMSFile:
     LMS_IDENT = "8s 2s"
     LMS_HEADER = "2x B B H 2x I 10x"
@@ -243,7 +299,7 @@ class LMSProjectFile:
             "TGL2": UnknownBlock,
             "SYL3": UnknownBlock,
             "SLB1": HashTableBlock,
-            "CTI1": UnknownBlock,
+            "CTI1": CTI1Block,
         }
 
         unpacked_sections: Dict[str, LMSBlock] = {}
@@ -259,6 +315,7 @@ class LMSProjectFile:
             print(f"{k}: {v!r}")
 
         assert unpacked_sections["CLR1"].to_bytes() == lms.blocks["CLR1"]
+        assert unpacked_sections["CTI1"].to_bytes() == lms.blocks["CTI1"]
 
 
 Msbp = LMSProjectFile
