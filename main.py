@@ -13,7 +13,7 @@ from lxml.etree import _Element as XMLElement
 
 import nlzss11
 
-from lib.lms import Msbp
+from lib.lms import LMSProjectFile
 from lib.msbt import Msbt
 from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
@@ -171,7 +171,7 @@ def darc_to_xml(arc: Darc, compressed: bool = False) -> lxml.etree.ElementBase:
             container.append(node)
         elif file.endswith(".msbp"):
             print(f"processing msbp file !{file}")
-            p = Msbp.from_bytes(data)
+            p = LMSProjectFile.from_bytes(data)
             exit(1)
         else:
             print(f"including file !{file} as raw data")

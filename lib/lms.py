@@ -26,11 +26,11 @@ class LMSBlock(ABC):
     @staticmethod
     @abstractmethod
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "LMSBlock":
-        raise AssertionError
+        raise NotImplementedError
 
     @abstractmethod
     def to_bytes(self) -> bytes:
-        raise AssertionError
+        raise NotImplementedError
 
 
 class UnknownBlock(LMSBlock):
@@ -97,6 +97,8 @@ class HashTableBlock(LMSBlock):
 
 
 class CLR1Block(LMSBlock):
+    COLOR_STRUCT = "BBBB"
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN) -> None:
         self.colors = []
         self.byte_order = byte_order
@@ -111,7 +113,7 @@ class CLR1Block(LMSBlock):
         colors = []
         num_colors, = lms_file.byte_order.unpack("I", f.read(4))
         for _ in range(num_colors):
-            colors.append(lms_file.byte_order.unpack("BBBB", f.read(4)))
+            colors.append(lms_file.byte_order.unpack(CLR1Block.COLOR_STRUCT, f.read(4)))
 
         blk = CLR1Block()
         blk.colors = colors
@@ -123,12 +125,14 @@ class CLR1Block(LMSBlock):
 
         f.write(self.byte_order.pack("I", len(self.colors)))
         for c in self.colors:
-            f.write(self.byte_order.pack("BBBB", *c))
+            f.write(self.byte_order.pack(CLR1Block.COLOR_STRUCT, *c))
 
         return f.getvalue()
 
 
 class ATI2Block(LMSBlock):
+    ATTR_STRUCT = "BBHI"
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN) -> None:
         self.attributes = []
         self.byte_order = byte_order
@@ -143,7 +147,7 @@ class ATI2Block(LMSBlock):
         attrs = []
         num_attrs, = lms_file.byte_order.unpack("I", f.read(4))
         for _ in range(num_attrs):
-            attrs.append(lms_file.byte_order.unpack("BBHI", f.read(8)))
+            attrs.append(lms_file.byte_order.unpack(ATI2Block.ATTR_STRUCT, f.read(8)))
 
         blk = ATI2Block()
         blk.attrs = attrs
@@ -155,7 +159,41 @@ class ATI2Block(LMSBlock):
 
         f.write(self.byte_order.pack("I", len(self.attributes)))
         for a in self.attributes:
-            f.write(self.byte_order.pack("BBHI", *a))
+            f.write(self.byte_order.pack(ATI2Block.ATTR_STRUCT, *a))
+
+        return f.getvalue()
+
+
+class SYL3Block(LMSBlock):
+    STYLE_STRUCT = "IIIi"
+
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN) -> None:
+        self.byte_order = byte_order
+        self.styles = []
+
+    def __repr__(self) -> str:
+        return f"<SYL3Block styles={self.styles!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "SYL3Block":
+        f = io.BytesIO(data)
+
+        styles = []
+        num, = lms_file.byte_order.unpack("I", f.read(4))
+        for _ in range(num):
+            styles.append(lms_file.byte_order.unpack(SYL3Block.STYLE_STRUCT, f.read(16)))
+
+        blk = SYL3Block()
+        blk.byte_order = lms_file.byte_order
+        blk.styles = styles
+        return blk
+
+    def to_bytes(self) -> bytes:
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("I", len(self.styles)))
+        for a in self.styles:
+            f.write(self.byte_order.pack(SYL3Block.STYLE_STRUCT, *a))
 
         return f.getvalue()
 
@@ -266,7 +304,7 @@ class LMSFile:
         return lms
 
     def to_bytes(self) -> bytes:
-        pass
+        raise NotImplementedError
 
 
 class LMSProjectFile:
@@ -284,8 +322,8 @@ class LMSProjectFile:
     def from_bytes(data: bytes) -> "LMSProjectFile":
         lms = LMSFile.from_bytes(data)
 
-        if lms.magic != Msbp.MSBP_MAGIC:
-            raise TypeError(f"Invalid magic: expected {Msbp.MSBP_MAGIC!r} got {lms.magic!r}")
+        if lms.magic != LMSProjectFile.MSBP_MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSProjectFile.MSBP_MAGIC!r} got {lms.magic!r}")
 
         section_types: Dict[str, Type[LMSBlock]] = {
             "CLR1": CLR1Block,
@@ -297,7 +335,7 @@ class LMSProjectFile:
             "TAG2": UnknownBlock,
             "TGP2": UnknownBlock,
             "TGL2": UnknownBlock,
-            "SYL3": UnknownBlock,
+            "SYL3": SYL3Block,
             "SLB1": HashTableBlock,
             "CTI1": CTI1Block,
         }
@@ -308,14 +346,9 @@ class LMSProjectFile:
                 raise RuntimeError(f"Unhandled block type: {block_type}")
             unpacked_sections[block_type] = section_types[block_type].from_bytes(data, lms)
 
-        # clb1 = HashTableBlock.from_bytes(lms.blocks["CLB1"], lms)
-        # print(clb1)
-
         for k, v in unpacked_sections.items():
             print(f"{k}: {v!r}")
 
         assert unpacked_sections["CLR1"].to_bytes() == lms.blocks["CLR1"]
+        assert unpacked_sections["SYL3"].to_bytes() == lms.blocks["SYL3"]
         assert unpacked_sections["CTI1"].to_bytes() == lms.blocks["CTI1"]
-
-
-Msbp = LMSProjectFile
