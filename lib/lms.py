@@ -3,7 +3,6 @@ import os
 import struct
 import io
 import typing
-from collections import namedtuple
 from typing import Dict, Type
 
 from lib.byteorder import ByteOrder, ByteOrderType
@@ -56,11 +55,10 @@ class UnknownBlock(LMSBlock):
 
 
 class HashTableBlock(LMSBlock):
-    def __init__(self, num_slots: int, byte_order: ByteOrderType, encoding: str) -> None:
+    def __init__(self, num_slots: int, byte_order: ByteOrderType) -> None:
         self.num_slots = num_slots
         self.labels = {}
         self.byte_order = byte_order
-        self.encoding = encoding
 
     @staticmethod
     def hash(label: str, num_slots: int) -> int:
@@ -73,7 +71,6 @@ class HashTableBlock(LMSBlock):
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "HashTableBlock":
         f = io.BytesIO(data)
         byte_order = lms_file.byte_order
-        encoding = lms_file.encoding
 
         num_slots, = byte_order.unpack("I", f.read(4))
 
@@ -88,22 +85,23 @@ class HashTableBlock(LMSBlock):
                     label_len, = byte_order.unpack("B", f.read(1))
                     label = ""
                     for _ in range(label_len):
-                        label += read_char(f, encoding)
+                        label += read_char(f, "utf-8")
                     item, = byte_order.unpack("I", f.read(4))
                     labels[label] = item
                 f.seek(pos, os.SEEK_SET)
 
-        tab = HashTableBlock(num_slots, byte_order, encoding)
+        tab = HashTableBlock(num_slots, byte_order)
         tab.labels = labels
         return tab
 
     def to_bytes(self) -> bytes:
-        ...
+        raise NotImplementedError
 
     def __repr__(self) -> str:
         return f"<HashTableBlock slots={self.num_slots} labels={self.labels!r}>"
 
 
+# Start of MSBP file blocks
 class CLR1Block(LMSBlock):
     COLOR_STRUCT = "BBBB"
 
@@ -472,6 +470,53 @@ class CTI1Block(LMSBlock):
             f.write(b"\x00")
 
         return f.getvalue()
+# End of MSBP file blocks
+
+
+# Start of MSBT file blocks
+class TXT2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.messages = []
+
+    def __repr__(self) -> str:
+        return f"<TXT2Block messages={self.messages!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "TXT2Block":
+        f = io.BytesIO(data)
+
+        messages = []
+        num_messages, = lms_file.byte_order.unpack("I", f.read(4))
+        for _ in range(num_messages):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+
+            msg = ""
+            tags = []
+            while (ch := read_char(f, lms_file.encoding)) != "\0":
+                if ch == "\x0E":
+                    tag_group, tag_type, param_size = lms_file.byte_order.unpack("HHH", f.read(6))
+                    param_data = f.read(param_size)
+                    tags.append((tag_group, tag_type, param_data))
+                    msg += "￼"
+                else:
+                    msg += ch
+            messages.append((msg, tags))
+            f.seek(pos, os.SEEK_SET)
+
+        blk = TXT2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.messages = messages
+        return blk
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError
+
+# End of MSBT file blocks
 
 
 class LMSFile:
@@ -532,9 +577,7 @@ class LMSFile:
 
 
 class LMSProjectFile:
-    MSBP_MAGIC = b"MsgPrjBn"
-
-    IDENT_STRUCT = "8s 2s"
+    MAGIC = b"MsgPrjBn"
 
     def __init__(self) -> None:
         ...
@@ -546,8 +589,8 @@ class LMSProjectFile:
     def from_bytes(data: bytes) -> "LMSProjectFile":
         lms = LMSFile.from_bytes(data)
 
-        if lms.magic != LMSProjectFile.MSBP_MAGIC:
-            raise TypeError(f"Invalid magic: expected {LMSProjectFile.MSBP_MAGIC!r} got {lms.magic!r}")
+        if lms.magic != LMSProjectFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSProjectFile.MAGIC!r} got {lms.magic!r}")
 
         section_types: Dict[str, Type[LMSBlock]] = {
             "CLR1": CLR1Block,
@@ -573,7 +616,50 @@ class LMSProjectFile:
 
             try:
                 assert b.to_bytes() == data
-                print(f"[✓] {block_type}")
+                print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
+            except AssertionError:
+                print(f"[✗] {block_type} (assert failed)")
+            except NotImplementedError:
+                print(f"[✗] {block_type} (not implemented)")
+
+            unpacked_sections[block_type] = b
+
+        for k, v in unpacked_sections.items():
+            print(f"{k}: {v!r}")
+
+
+class LMSStandardFile:
+    MAGIC = b"MsgStdBn"
+
+    def __init__(self) -> None:
+        ...
+
+    def to_bytes(self) -> bytes:
+        ...
+
+    @staticmethod
+    def from_bytes(data: bytes) -> "LMSStandardFile":
+        lms = LMSFile.from_bytes(data)
+
+        if lms.magic != LMSStandardFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSStandardFile.MAGIC!r} got {lms.magic!r}")
+
+        section_types: Dict[str, Type[LMSBlock]] = {
+            "LBL1": HashTableBlock,
+            "ATR1": UnknownBlock,
+            "TXT2": TXT2Block,
+        }
+
+        unpacked_sections: Dict[str, LMSBlock] = {}
+        for block_type, data in lms.blocks.items():
+            if block_type not in section_types:
+                raise RuntimeError(f"Unhandled block type: {block_type}")
+
+            b = section_types[block_type].from_bytes(data, lms)
+
+            try:
+                assert b.to_bytes() == data
+                print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
             except AssertionError:
                 print(f"[✗] {block_type} (assert failed)")
             except NotImplementedError:

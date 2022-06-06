@@ -13,7 +13,7 @@ from lxml.etree import _Element as XMLElement
 
 import nlzss11
 
-from lib.lms import LMSProjectFile
+from lib.lms import LMSProjectFile, LMSStandardFile
 from lib.msbt import Msbt
 from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
@@ -305,11 +305,17 @@ def test_main() -> int:
 
     print(exts)
 
-    for file, data in files["msbp"]:
-        print(f"processing msbp file !{file}")
-        p = LMSProjectFile.from_bytes(data)
-        # input("press a key")
-        print()
+    # for file, data in files["msbp"]:
+    #     print(f"processing msbp file !{file}")
+    #     p = LMSProjectFile.from_bytes(data)
+    #     # input("press a key")
+    #     print()
+
+    for file, data in files["msbt"]:
+        print(f"processing msbt file !{file}")
+        p = LMSStandardFile.from_bytes(data)
+        input("press a key")
+        # print()
 
     return 0
 
