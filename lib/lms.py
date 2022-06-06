@@ -742,3 +742,33 @@ class LMSStandardFile:
 
     def to_bytes(self) -> bytes:
         ...
+
+
+class LMSFlowFile:
+    MAGIC = b"MsgFlwBn"
+
+    def __init__(self) -> None:
+        ...
+
+    @staticmethod
+    def from_bytes(data: bytes) -> "LMSFlowFile":
+        lms = LMSFile.from_bytes(data)
+
+        if lms.magic != LMSFlowFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSFlowFile.MAGIC!r} got {lms.magic!r}")
+
+        section_types: Dict[str, Type[LMSBlock]] = {
+            "FLW3": UnknownBlock,
+            "FEN1": UnknownBlock,
+        }
+
+        unpacked_sections = interpret_blocks(section_types, lms)
+        for k, v in unpacked_sections.items():
+            print(f"{k}: {v!r}")
+
+        # todo: copy in blocks
+        prj = LMSFlowFile()
+        return prj
+
+    def to_bytes(self) -> bytes:
+        ...
