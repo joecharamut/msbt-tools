@@ -314,8 +314,8 @@ def test_main() -> int:
     for file, data in files["msbt"]:
         print(f"processing msbt file !{file}")
         p = LMSStandardFile.from_bytes(data)
-        input("press a key")
-        # print()
+        # input("press a key")
+        print()
 
     return 0
 

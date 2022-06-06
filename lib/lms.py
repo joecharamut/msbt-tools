@@ -516,6 +516,85 @@ class TXT2Block(LMSBlock):
     def to_bytes(self) -> bytes:
         raise NotImplementedError
 
+
+class ATR1Block(LMSBlock):
+    # TODO: research this further
+    # TODO: DONT USE THIS just use the unknown one so no editing
+
+    # ATR1 Block Format:
+    # Most likely is game independent, but i need it for Tomodachi Life
+    # OFFSET | SIZE | DESCRIPTION
+    # 0x0    |   4  | Number of attributes
+    # 0x4    |   4  | Bytes per attribute
+    # ...    |   x  | Attributes
+    # ...    |   x  | Strings (UTF-16?)
+    #
+    # Attribute format (as far as i can guess)
+    # OFFSET | SIZE | DESCRIPTION
+    # 0x00   |   4  | Always zero?
+    # 0x04   |   4  | String offset (name?)
+    # 0x08   |   4  | String offset (unknown)
+    # 0x0C   |   4  | String offset (unknown)
+    # 0x10   |   4  | String offset (unknown)
+    # 0x14   |   4  | String offset (unknown)
+    # 0x18   |  36  | Rest of attribute
+
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN) -> None:
+        self.byte_order = byte_order
+        self.data = bytes()
+        self.attributes = []
+        self.strings = []
+
+    def __repr__(self) -> str:
+        return f"<ATR1Block attributes={[a[0] for a in self.attributes]!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "ATR1Block":
+        f = io.BytesIO(data)
+
+        attrs = []
+        strings = []
+        num_attrs, bytes_per_attr = lms_file.byte_order.unpack("I I", f.read(8))
+        if bytes_per_attr != 0:
+            for _ in range(num_attrs):
+                a = f.read(bytes_per_attr)
+
+                str_off, = lms_file.byte_order.unpack("I", a[4:8])
+                pos = f.tell()
+                f.seek(str_off, os.SEEK_SET)
+                name = read_str(f, lms_file.encoding)
+                attrs.append((name, a))
+                f.seek(pos, os.SEEK_SET)
+
+            offs = {}
+            if f.tell() < len(data):
+                # print("guessing a string table (prepare for danger)")
+                while f.tell() < len(data):
+                    # print(f"start of string: {f.tell()}")
+                    off = f.tell()
+                    string = read_str(f, lms_file.encoding)
+                    strings.append(string)
+                    offs[off] = string
+
+            for name, attr in attrs:
+                buf = io.BytesIO(attr)
+                # check every int why not
+                for i in range(0, len(attr), 4):
+                    val, = lms_file.byte_order.unpack("I", buf.read(4))
+                    if val in offs:
+                        # print(f"possible string: attr offset {hex(i)}={val} => {offs[val]!r}")
+                        pass
+
+        blk = ATR1Block()
+        blk.byte_order = lms_file.byte_order
+        blk.data = data
+        blk.attributes = attrs
+        blk.strings = strings
+        return blk
+
+    def to_bytes(self) -> bytes:
+        return self.data
+
 # End of MSBT file blocks
 
 
