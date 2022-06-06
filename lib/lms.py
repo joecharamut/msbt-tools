@@ -3,6 +3,7 @@ import os
 import struct
 import io
 import typing
+from collections import namedtuple
 from typing import Dict, Type
 
 from lib.byteorder import ByteOrder, ByteOrderType
@@ -18,8 +19,15 @@ def read_char(f: typing.BinaryIO, encoding: str) -> str:
     return f.read(width).decode(encoding)
 
 
-def write_char(f: typing.BinaryIO, encoding: str, ch: str) -> int:
-    return f.write(ch.encode(encoding))
+def read_str(f: typing.BinaryIO, encoding: str, length: int = -1) -> str:
+    if length == -1:
+        s = ""
+        while (c := read_char(f, encoding)) != "\0":
+            s += c
+        return s
+    else:
+        width = len("A".encode(encoding))
+        return f.read(length * width).decode(encoding)
 
 
 class LMSBlock(ABC):
@@ -160,6 +168,176 @@ class ATI2Block(LMSBlock):
         f.write(self.byte_order.pack("I", len(self.attributes)))
         for a in self.attributes:
             f.write(self.byte_order.pack(ATI2Block.ATTR_STRUCT, *a))
+
+        return f.getvalue()
+
+
+class TGG2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.groups = {}
+
+    def __repr__(self) -> str:
+        return f"<TGG2Block groups={self.groups!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGG2Block":
+        f = io.BytesIO(data)
+
+        groups = {}
+        num_groups, = lms_file.byte_order.unpack("H 2x", f.read(4))
+        for _ in range(num_groups):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+            num_tags, = lms_file.byte_order.unpack("H", f.read(2))
+            tag_indexes = []
+            for _ in range(num_tags):
+                i, = lms_file.byte_order.unpack("H", f.read(2))
+                tag_indexes.append(i)
+            name = read_str(f, lms_file.encoding)
+            groups[name] = tag_indexes
+            f.seek(pos, os.SEEK_SET)
+
+        blk = TGG2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.groups = groups
+        return blk
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError
+
+
+class TAG2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.tags = {}
+
+    def __repr__(self) -> str:
+        return f"<TAG2Block tags={self.tags!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "TAG2Block":
+        f = io.BytesIO(data)
+
+        tags = {}
+        num_tags, = lms_file.byte_order.unpack("H 2x", f.read(4))
+        for _ in range(num_tags):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+            num_params, = lms_file.byte_order.unpack("H", f.read(2))
+            param_indexes = []
+            for _ in range(num_params):
+                i, = lms_file.byte_order.unpack("H", f.read(2))
+                param_indexes.append(i)
+            name = read_str(f, lms_file.encoding)
+            tags[name] = param_indexes
+            f.seek(pos, os.SEEK_SET)
+
+        blk = TAG2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.tags = tags
+        return blk
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError
+
+
+class TGP2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.parameters = {}
+
+    def __repr__(self) -> str:
+        return f"<TGP2Block tags={self.parameters!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGP2Block":
+        f = io.BytesIO(data)
+
+        params = {}
+        num_params, = lms_file.byte_order.unpack("H 2x", f.read(4))
+        for _ in range(num_params):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+
+            param_type, = lms_file.byte_order.unpack("B", f.read(1))
+
+            if param_type != 9:
+                name = read_str(f, lms_file.encoding)
+                params[name] = (param_type,)
+            else:
+                num_items, = lms_file.byte_order.unpack("1x H", f.read(3))
+                items = []
+                for _ in range(num_items):
+                    i, = lms_file.byte_order.unpack("H", f.read(2))
+                    items.append(i)
+                name = read_str(f, lms_file.encoding)
+                params[name] = (param_type, items)
+
+            f.seek(pos, os.SEEK_SET)
+
+        blk = TGP2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.parameters = params
+        return blk
+
+    def to_bytes(self) -> bytes:
+        raise NotImplementedError
+
+
+class TGL2Block(LMSBlock):
+    def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8"):
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.lists = []
+
+    def __repr__(self) -> str:
+        return f"<TGL2Block lists={self.lists!r}>"
+
+    @staticmethod
+    def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGL2Block":
+        f = io.BytesIO(data)
+
+        names = []
+        items, = lms_file.byte_order.unpack("H 2x", f.read(4))
+        for _ in range(items):
+            offset, = lms_file.byte_order.unpack("I", f.read(4))
+            pos = f.tell()
+            f.seek(offset, os.SEEK_SET)
+            name = read_str(f, lms_file.encoding)
+            names.append(name)
+            f.seek(pos, os.SEEK_SET)
+
+        blk = TGL2Block()
+        blk.byte_order = lms_file.byte_order
+        blk.encoding = lms_file.encoding
+        blk.lists = names
+        return blk
+
+    def to_bytes(self) -> bytes:
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("H 2x", len(self.lists)))
+
+        # reserve space for offsets
+        f.write(b"\x00"*4*len(self.lists))
+
+        for i, name in enumerate(self.lists):
+            pos = f.tell()
+            f.seek(4 + (4 * i), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", pos))
+            f.seek(pos, os.SEEK_SET)
+            f.write(name.encode(self.encoding))
+            f.write(b"\x00")
 
         return f.getvalue()
 
@@ -331,10 +509,10 @@ class LMSProjectFile:
             "ATI2": ATI2Block,
             "ALB1": HashTableBlock,
             "ALI2": UnknownBlock,
-            "TGG2": UnknownBlock,
-            "TAG2": UnknownBlock,
-            "TGP2": UnknownBlock,
-            "TGL2": UnknownBlock,
+            "TGG2": TGG2Block,
+            "TAG2": TAG2Block,
+            "TGP2": TGP2Block,
+            "TGL2": TGL2Block,
             "SYL3": SYL3Block,
             "SLB1": HashTableBlock,
             "CTI1": CTI1Block,
@@ -351,4 +529,5 @@ class LMSProjectFile:
 
         assert unpacked_sections["CLR1"].to_bytes() == lms.blocks["CLR1"]
         assert unpacked_sections["SYL3"].to_bytes() == lms.blocks["SYL3"]
+        assert unpacked_sections["TGL2"].to_bytes() == lms.blocks["TGL2"]
         assert unpacked_sections["CTI1"].to_bytes() == lms.blocks["CTI1"]
