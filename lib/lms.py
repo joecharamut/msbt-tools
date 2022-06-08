@@ -273,7 +273,37 @@ class ALI2Block(LMSBlock):
         return blk
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("I", len(self.lists)))
+        f.write(b"\x00" * 4 * len(self.lists))
+
+        for list_idx, l in enumerate(self.lists):
+            list_pos = f.tell()
+            f.seek(4 * (list_idx + 1), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", list_pos))
+            f.seek(list_pos, os.SEEK_SET)
+
+            list_base = f.tell()
+            f.write(self.byte_order.pack("I", len(l)))
+            f.write(b"\x00" * 4 * len(l))
+
+            for string_idx, string in enumerate(l):
+                string_pos = f.tell()
+                f.write(string.encode(self.encoding))
+                f.write(b"\x00")
+
+                after = f.tell()
+
+                f.seek(list_base + (4 * (string_idx + 1)), os.SEEK_SET)
+                f.write(self.byte_order.pack("I", string_pos - list_base))
+                f.seek(after, os.SEEK_SET)
+
+            remain = f.tell() % 4
+            if remain > 0:
+                f.write(b"\x00" * (4 - remain))
+
+        return f.getvalue()
 
 
 class TGG2Block(LMSBlock):
