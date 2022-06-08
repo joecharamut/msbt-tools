@@ -305,11 +305,11 @@ def test_main() -> int:
 
     print(exts)
 
-    # for file, data in files["msbp"]:
-    #     print(f"processing msbp file !{file}")
-    #     p = LMSProjectFile.from_bytes(data)
-    #     # input("press a key")
-    #     print()
+    for file, data in files["msbp"]:
+        print(f"processing msbp file !{file}")
+        p = LMSProjectFile.from_bytes(data)
+        # input("press a key")
+        print()
 
     # for file, data in files["msbt"]:
     #     print(f"processing msbt file !{file}")
@@ -317,11 +317,11 @@ def test_main() -> int:
     #     # input("press a key")
     #     print()
 
-    for file, data in files["msbf"]:
-        print(f"processing msbf file !{file}")
-        p = LMSFlowFile.from_bytes(data)
-        # input("press a key")
-        print()
+    # for file, data in files["msbf"]:
+    #     print(f"processing msbf file !{file}")
+    #     p = LMSFlowFile.from_bytes(data)
+    #     # input("press a key")
+    #     print()
 
     return 0
 

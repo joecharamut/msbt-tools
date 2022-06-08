@@ -5,6 +5,8 @@ import io
 import typing
 from typing import Dict, Type
 
+import hexdump
+
 from lib.byteorder import ByteOrder, ByteOrderType
 
 
@@ -35,17 +37,27 @@ def interpret_blocks(types: Dict[str, Type["LMSBlock"]], lms_file: "LMSFile") ->
         if block_type not in types:
             raise RuntimeError(f"Unhandled block type: {block_type}")
 
-        b = types[block_type].from_bytes(data, lms_file)
+        unpacked_sections[block_type] = types[block_type].from_bytes(data, lms_file)
 
-        try:
-            assert b.to_bytes() == data
-            print(f"[{'?' if isinstance(b, UnknownBlock) else '✓'}] {block_type}")
-        except AssertionError:
-            print(f"[✗] {block_type} (assert failed)")
-        except NotImplementedError:
-            print(f"[✗] {block_type} (not implemented)")
-
-        unpacked_sections[block_type] = b
+        debug_back_to_bytes = True
+        debug_raise_errors = False
+        if debug_back_to_bytes:
+            # todo debugging
+            try:
+                new = unpacked_sections[block_type].to_bytes()
+                assert new == data
+                print(f"[{'?' if isinstance(unpacked_sections[block_type], UnknownBlock) else '✓'}] {block_type}")
+            except AssertionError:
+                print(f"[✗] {block_type} (assert failed)")
+                hexdump.hexdump(new)
+                print("/\\new   old\\/")
+                hexdump.hexdump(data)
+                if debug_raise_errors:
+                    raise
+            except NotImplementedError:
+                print(f"[✗] {block_type} (not implemented)")
+                if debug_raise_errors:
+                    raise
     return unpacked_sections
 
 
@@ -60,6 +72,7 @@ class LMSBlock(ABC):
         raise NotImplementedError
 
 
+# Start of common blocks
 class UnknownBlock(LMSBlock):
     def __init__(self) -> None:
         self.data = bytes()
@@ -116,9 +129,36 @@ class HashTableBlock(LMSBlock):
 
     def to_bytes(self) -> bytes:
         raise NotImplementedError
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("I", self.num_slots))
+
+        slots = {x: [] for x in range(self.num_slots)}
+        for lbl in self.labels:
+            slots[HashTableBlock.hash(lbl, self.num_slots)].append(lbl)
+
+        slots_start = f.tell()
+        f.write(b"\x00" * self.num_slots * 8)
+
+        for k, v in slots.items():
+            pos = f.tell()
+            for lbl in v:
+                f.write(self.byte_order.pack("B", len(lbl)))
+                f.write(lbl.encode("utf-8"))
+                f.write(b"\x00")
+                f.write(b"\x00")
+                f.write(b"\x00")
+            end = f.tell()
+
+            f.seek(slots_start + (k * 8), os.SEEK_SET)
+            f.write(self.byte_order.pack("I I", len(v), pos))
+            f.seek(end, os.SEEK_SET)
+
+        return f.getvalue()
 
     def __repr__(self) -> str:
         return f"<HashTableBlock slots={self.num_slots} labels={self.labels!r}>"
+# End of common blocks
 
 
 # Start of MSBP file blocks
@@ -176,7 +216,7 @@ class ATI2Block(LMSBlock):
             attrs.append(lms_file.byte_order.unpack(ATI2Block.ATTR_STRUCT, f.read(8)))
 
         blk = ATI2Block()
-        blk.attrs = attrs
+        blk.attributes = attrs
         blk.byte_order = lms_file.byte_order
         return blk
 
@@ -759,7 +799,7 @@ class LMSFlowFile:
 
         section_types: Dict[str, Type[LMSBlock]] = {
             "FLW3": UnknownBlock,
-            "FEN1": UnknownBlock,
+            "FEN1": HashTableBlock,
         }
 
         unpacked_sections = interpret_blocks(section_types, lms)
