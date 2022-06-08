@@ -61,6 +61,13 @@ def interpret_blocks(types: Dict[str, Type["LMSBlock"]], lms_file: "LMSFile") ->
     return unpacked_sections
 
 
+def align_buf(f: typing.BinaryIO, n: int) -> int:
+    remain = f.tell() % n
+    if remain > 0:
+        return f.write(b"\x00" * (n - remain))
+    return 0
+
+
 class LMSBlock(ABC):
     @staticmethod
     @abstractmethod
@@ -145,8 +152,6 @@ class HashTableBlock(LMSBlock):
             for lbl in v:
                 f.write(self.byte_order.pack("B", len(lbl)))
                 f.write(lbl.encode("utf-8"))
-                f.write(b"\x00")
-                f.write(b"\x00")
                 f.write(b"\x00")
             end = f.tell()
 
@@ -341,7 +346,25 @@ class TGG2Block(LMSBlock):
         return blk
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("H 2x", len(self.groups)))
+        f.write(b"\x00" * 4 * len(self.groups))
+
+        for i, (group, tags) in enumerate(self.groups.items()):
+            group_pos = f.tell()
+            f.seek(4 * (i + 1), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", group_pos))
+            f.seek(group_pos, os.SEEK_SET)
+
+            f.write(self.byte_order.pack("H", len(tags)))
+            for x in tags:
+                f.write(self.byte_order.pack("H", x))
+            f.write(group.encode(self.encoding))
+            f.write(b"\x00")
+            align_buf(f, 4)
+
+        return f.getvalue()
 
 
 class TAG2Block(LMSBlock):
