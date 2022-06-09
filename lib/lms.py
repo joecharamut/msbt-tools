@@ -427,16 +427,16 @@ class TGP2Block(LMSBlock):
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
-        self.parameters = {}
+        self.parameters = []
 
     def __repr__(self) -> str:
-        return f"<TGP2Block tags={self.parameters!r}>"
+        return f"<TGP2Block parameters={self.parameters!r}>"
 
     @staticmethod
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGP2Block":
         f = io.BytesIO(data)
 
-        params = {}
+        params = []
         num_params, = lms_file.byte_order.unpack("H 2x", f.read(4))
         for _ in range(num_params):
             offset, = lms_file.byte_order.unpack("I", f.read(4))
@@ -447,7 +447,7 @@ class TGP2Block(LMSBlock):
 
             if param_type != 9:
                 name = read_str(f, lms_file.encoding)
-                params[name] = (param_type,)
+                params.append((name, param_type, []))
             else:
                 num_items, = lms_file.byte_order.unpack("1x H", f.read(3))
                 items = []
@@ -455,7 +455,7 @@ class TGP2Block(LMSBlock):
                     i, = lms_file.byte_order.unpack("H", f.read(2))
                     items.append(i)
                 name = read_str(f, lms_file.encoding)
-                params[name] = (param_type, items)
+                params.append((name, param_type, items))
 
             f.seek(pos, os.SEEK_SET)
 
@@ -466,7 +466,30 @@ class TGP2Block(LMSBlock):
         return blk
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("H 2x", len(self.parameters)))
+        f.write(b"\x00" * 4 * len(self.parameters))
+
+        for i, (name, param_type, items) in enumerate(self.parameters):
+            group_pos = f.tell()
+            f.seek(4 * (i + 1), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", group_pos))
+            f.seek(group_pos, os.SEEK_SET)
+
+            f.write(self.byte_order.pack("B", param_type))
+            if param_type != 9:
+                f.write(name.encode(self.encoding))
+                f.write(b"\x00")
+            else:
+                f.write(self.byte_order.pack("1x H", len(items)))
+                for x in items:
+                    f.write(self.byte_order.pack("H", x))
+                f.write(name.encode(self.encoding))
+                f.write(b"\x00")
+            align_buf(f, 4)
+
+        return f.getvalue()
 
 
 class TGL2Block(LMSBlock):
