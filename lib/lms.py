@@ -371,7 +371,7 @@ class TAG2Block(LMSBlock):
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
-        self.tags = {}
+        self.tags = []
 
     def __repr__(self) -> str:
         return f"<TAG2Block tags={self.tags!r}>"
@@ -380,7 +380,7 @@ class TAG2Block(LMSBlock):
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "TAG2Block":
         f = io.BytesIO(data)
 
-        tags = {}
+        tags = []
         num_tags, = lms_file.byte_order.unpack("H 2x", f.read(4))
         for _ in range(num_tags):
             offset, = lms_file.byte_order.unpack("I", f.read(4))
@@ -392,7 +392,7 @@ class TAG2Block(LMSBlock):
                 i, = lms_file.byte_order.unpack("H", f.read(2))
                 param_indexes.append(i)
             name = read_str(f, lms_file.encoding)
-            tags[name] = param_indexes
+            tags.append((name, param_indexes))
             f.seek(pos, os.SEEK_SET)
 
         blk = TAG2Block()
@@ -402,7 +402,25 @@ class TAG2Block(LMSBlock):
         return blk
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
+        f = io.BytesIO()
+
+        f.write(self.byte_order.pack("H 2x", len(self.tags)))
+        f.write(b"\x00" * 4 * len(self.tags))
+
+        for i, (tag, params) in enumerate(self.tags):
+            group_pos = f.tell()
+            f.seek(4 * (i + 1), os.SEEK_SET)
+            f.write(self.byte_order.pack("I", group_pos))
+            f.seek(group_pos, os.SEEK_SET)
+
+            f.write(self.byte_order.pack("H", len(params)))
+            for x in params:
+                f.write(self.byte_order.pack("H", x))
+            f.write(tag.encode(self.encoding))
+            f.write(b"\x00")
+            align_buf(f, 4)
+
+        return f.getvalue()
 
 
 class TGP2Block(LMSBlock):
