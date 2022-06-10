@@ -269,6 +269,10 @@ def recompile_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def editor_main(args: argparse.Namespace) -> int:
+    return 0
+
+
 def test_main() -> int:
     message_files = []
     messages_path = Path("/home/joseph/Documents/tomodachi_life/romfs/message")
@@ -334,14 +338,18 @@ def main_args() -> int:
     parser.add_argument("-v", "--verbose", action="count", default=0, help="More logging output")
 
     action_group = parser.add_mutually_exclusive_group()
+    action_group.add_argument("--test", action="store_true", help="test")
     action_group.add_argument("--decompile", action="store_true", help="Decompile a binary message file")
     action_group.add_argument("--compile", action="store_true", help="Compile an XML file to its binary representation")
-    action_group.add_argument("--dump", action="store_true", help="Not sure about this yet")
+    action_group.add_argument("--editor", action="store_true", help="Launch the editor GUI")
 
-    parser.add_argument("-i", "--input", metavar="FILE", help="The input file", required=True)
+    parser.add_argument("-i", "--input", metavar="FILE", help="The input file")
     parser.add_argument("-o", "--output", metavar="FILE", help="The destination file")
 
     args = parser.parse_args()
+
+    if args.test:
+        return test_main()
 
     if args.decompile:
         return decompile_main(args)
@@ -349,9 +357,11 @@ def main_args() -> int:
     if args.compile:
         return recompile_main(args)
 
+    if args.editor:
+        return editor_main(args)
+
     return 1
 
 
 if __name__ == "__main__":
-    exit(test_main())
     exit(main_args())
