@@ -31,36 +31,6 @@ def read_str(f: typing.BinaryIO, encoding: str, length: int = -1) -> str:
         return f.read(length * width).decode(encoding)
 
 
-def interpret_blocks(types: Dict[str, Type["LMSBlock"]], lms_file: "LMSFile") -> Dict[str, "LMSBlock"]:
-    unpacked_sections: Dict[str, LMSBlock] = {}
-    for block_type, data in lms_file.blocks.items():
-        if block_type not in types:
-            raise RuntimeError(f"Unhandled block type: {block_type}")
-
-        unpacked_sections[block_type] = types[block_type].from_bytes(data, lms_file)
-
-        debug_back_to_bytes = True
-        debug_raise_errors = False
-        if debug_back_to_bytes:
-            # todo debugging
-            try:
-                new = unpacked_sections[block_type].to_bytes()
-                assert new == data
-                print(f"[{'?' if isinstance(unpacked_sections[block_type], UnknownBlock) else '✓'}] {block_type}")
-            except AssertionError:
-                print(f"[✗] {block_type} (assert failed)")
-                hexdump.hexdump(new)
-                print("/\\new   old\\/")
-                hexdump.hexdump(data)
-                if debug_raise_errors:
-                    raise
-            except NotImplementedError:
-                print(f"[✗] {block_type} (not implemented)")
-                if debug_raise_errors:
-                    raise
-    return unpacked_sections
-
-
 def align_buf(f: typing.BinaryIO, n: int) -> int:
     remain = f.tell() % n
     if remain > 0:
@@ -79,7 +49,7 @@ class LMSBlock(ABC):
         raise NotImplementedError
 
 
-# Start of common blocks
+# Start of common raw_blocks
 class UnknownBlock(LMSBlock):
     def __init__(self) -> None:
         self.data = bytes()
@@ -135,7 +105,6 @@ class HashTableBlock(LMSBlock):
         return tab
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
         f = io.BytesIO()
 
         f.write(self.byte_order.pack("I", self.num_slots))
@@ -153,6 +122,7 @@ class HashTableBlock(LMSBlock):
                 f.write(self.byte_order.pack("B", len(lbl)))
                 f.write(lbl.encode("utf-8"))
                 f.write(b"\x00")
+                align_buf(f, 4)
             end = f.tell()
 
             f.seek(slots_start + (k * 8), os.SEEK_SET)
@@ -163,10 +133,10 @@ class HashTableBlock(LMSBlock):
 
     def __repr__(self) -> str:
         return f"<HashTableBlock slots={self.num_slots} labels={self.labels!r}>"
-# End of common blocks
+# End of common raw_blocks
 
 
-# Start of MSBP file blocks
+# Start of MSBP file raw_blocks
 class CLR1Block(LMSBlock):
     COLOR_STRUCT = "BBBB"
 
@@ -624,10 +594,10 @@ class CTI1Block(LMSBlock):
             f.write(b"\x00")
 
         return f.getvalue()
-# End of MSBP file blocks
+# End of MSBP file raw_blocks
 
 
-# Start of MSBT file blocks
+# Start of MSBT file raw_blocks
 class TXT2Block(LMSBlock):
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
@@ -747,7 +717,7 @@ class ATR1Block(LMSBlock):
 
     def to_bytes(self) -> bytes:
         return self.data
-# End of MSBT file blocks
+# End of MSBT file raw_blocks
 
 
 class LMSFile:
@@ -757,14 +727,17 @@ class LMSFile:
 
     LMS_VERSION = 0x00000003
 
+    raw_blocks: dict[str, bytes]
+    blocks: dict[str, LMSBlock]
+
     def __init__(self) -> None:
         self.magic = b""
         self.byte_order = ByteOrder.LITTLE_ENDIAN
         self.encoding = "utf-8"
+        self.raw_blocks = {}
         self.blocks = {}
 
-    @staticmethod
-    def from_bytes(data: bytes) -> "LMSFile":
+    def _read_header(self, data: bytes) -> None:
         f = io.BytesIO(data)
 
         magic, bom = struct.unpack(LMSFile.LMS_IDENT, f.read(10))
@@ -796,113 +769,128 @@ class LMSFile:
             if rem > 0:
                 f.seek((16 - rem), os.SEEK_CUR)
 
-        lms = LMSFile()
-        lms.magic = magic
-        lms.byte_order = byte_order
-        lms.encoding = encoding
-        lms.blocks = blocks
-        return lms
+        self.magic = magic
+        self.byte_order = byte_order
+        self.encoding = encoding
+        self.raw_blocks = blocks
+
+    def _write_header(self) -> bytes:
+        raise NotImplementedError
+
+    def _parse_blocks(self, types: Dict[str, Type[LMSBlock]]):
+        unpacked_sections: Dict[str, LMSBlock] = {}
+        for block_type, data in self.raw_blocks.items():
+            if block_type not in types:
+                raise RuntimeError(f"Unhandled block type: {block_type}")
+
+            unpacked_sections[block_type] = types[block_type].from_bytes(data, self)
+
+            debug_back_to_bytes = True
+            debug_raise_errors = False
+            if debug_back_to_bytes:
+                # todo debugging
+                try:
+                    new = unpacked_sections[block_type].to_bytes()
+                    assert new == data
+                    print(f"[{'?' if isinstance(unpacked_sections[block_type], UnknownBlock) else '✓'}] {block_type}")
+                except AssertionError:
+                    print(f"[✗] {block_type} (assert failed)")
+                    hexdump.hexdump(new)
+                    print("/\\new   old\\/")
+                    hexdump.hexdump(data)
+                    if debug_raise_errors:
+                        raise
+                except NotImplementedError:
+                    print(f"[✗] {block_type} (not implemented)")
+                    if debug_raise_errors:
+                        raise
+        self.blocks = unpacked_sections
+
+
+class LMSProjectFile(LMSFile):
+    MAGIC: bytes = b"MsgPrjBn"
+    SECTIONS: Dict[str, Type[LMSBlock]] = {
+        "CLR1": CLR1Block,
+        "CLB1": HashTableBlock,
+        "ATI2": ATI2Block,
+        "ALB1": HashTableBlock,
+        "ALI2": ALI2Block,
+        "TGG2": TGG2Block,
+        "TAG2": TAG2Block,
+        "TGP2": TGP2Block,
+        "TGL2": TGL2Block,
+        "SYL3": SYL3Block,
+        "SLB1": HashTableBlock,
+        "CTI1": CTI1Block,
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @staticmethod
+    def from_bytes(data: bytes) -> "LMSProjectFile":
+        prj = LMSProjectFile()
+        prj._read_header(data)
+
+        if prj.magic != LMSProjectFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSProjectFile.MAGIC!r} got {prj.magic!r}")
+
+        prj._parse_blocks(LMSProjectFile.SECTIONS)
+
+        return prj
 
     def to_bytes(self) -> bytes:
         raise NotImplementedError
 
 
-class LMSProjectFile:
-    MAGIC = b"MsgPrjBn"
+class LMSStandardFile(LMSFile):
+    MAGIC: bytes = b"MsgStdBn"
+    SECTIONS: Dict[str, Type[LMSBlock]] = {
+        "LBL1": HashTableBlock,
+        "ATR1": UnknownBlock,
+        "TXT2": TXT2Block,
+    }
 
     def __init__(self) -> None:
-        ...
-
-    @staticmethod
-    def from_bytes(data: bytes) -> "LMSProjectFile":
-        lms = LMSFile.from_bytes(data)
-
-        if lms.magic != LMSProjectFile.MAGIC:
-            raise TypeError(f"Invalid magic: expected {LMSProjectFile.MAGIC!r} got {lms.magic!r}")
-
-        section_types: Dict[str, Type[LMSBlock]] = {
-            "CLR1": CLR1Block,
-            "CLB1": HashTableBlock,
-            "ATI2": ATI2Block,
-            "ALB1": HashTableBlock,
-            "ALI2": ALI2Block,
-            "TGG2": TGG2Block,
-            "TAG2": TAG2Block,
-            "TGP2": TGP2Block,
-            "TGL2": TGL2Block,
-            "SYL3": SYL3Block,
-            "SLB1": HashTableBlock,
-            "CTI1": CTI1Block,
-        }
-
-        unpacked_sections = interpret_blocks(section_types, lms)
-        for k, v in unpacked_sections.items():
-            print(f"{k}: {v!r}")
-
-        # todo: copy in blocks
-        prj = LMSProjectFile()
-        return prj
-
-    def to_bytes(self) -> bytes:
-        ...
-
-
-class LMSStandardFile:
-    MAGIC = b"MsgStdBn"
-
-    def __init__(self) -> None:
-        ...
+        super().__init__()
 
     @staticmethod
     def from_bytes(data: bytes) -> "LMSStandardFile":
-        lms = LMSFile.from_bytes(data)
-
-        if lms.magic != LMSStandardFile.MAGIC:
-            raise TypeError(f"Invalid magic: expected {LMSStandardFile.MAGIC!r} got {lms.magic!r}")
-
-        section_types: Dict[str, Type[LMSBlock]] = {
-            "LBL1": HashTableBlock,
-            "ATR1": UnknownBlock,
-            "TXT2": TXT2Block,
-        }
-
-        unpacked_sections = interpret_blocks(section_types, lms)
-        for k, v in unpacked_sections.items():
-            print(f"{k}: {v!r}")
-
-        # todo: copy in blocks
         msg = LMSStandardFile()
+        msg._read_header(data)
+
+        if msg.magic != LMSStandardFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSStandardFile.MAGIC!r} got {msg.magic!r}")
+
+        msg._parse_blocks(LMSStandardFile.SECTIONS)
+
         return msg
 
     def to_bytes(self) -> bytes:
-        ...
+        raise NotImplementedError
 
 
-class LMSFlowFile:
-    MAGIC = b"MsgFlwBn"
+class LMSFlowFile(LMSFile):
+    MAGIC: bytes = b"MsgFlwBn"
+    SECTIONS: Dict[str, Type[LMSBlock]] = {
+        "FLW3": UnknownBlock,
+        "FEN1": HashTableBlock,
+    }
 
     def __init__(self) -> None:
-        ...
+        super().__init__()
 
     @staticmethod
     def from_bytes(data: bytes) -> "LMSFlowFile":
-        lms = LMSFile.from_bytes(data)
+        flw = LMSFlowFile()
+        flw._read_header(data)
 
-        if lms.magic != LMSFlowFile.MAGIC:
-            raise TypeError(f"Invalid magic: expected {LMSFlowFile.MAGIC!r} got {lms.magic!r}")
+        if flw.magic != LMSFlowFile.MAGIC:
+            raise TypeError(f"Invalid magic: expected {LMSFlowFile.MAGIC!r} got {flw.magic!r}")
 
-        section_types: Dict[str, Type[LMSBlock]] = {
-            "FLW3": UnknownBlock,
-            "FEN1": HashTableBlock,
-        }
+        flw._parse_blocks(LMSFlowFile.SECTIONS)
 
-        unpacked_sections = interpret_blocks(section_types, lms)
-        for k, v in unpacked_sections.items():
-            print(f"{k}: {v!r}")
-
-        # todo: copy in blocks
-        prj = LMSFlowFile()
-        return prj
+        return flw
 
     def to_bytes(self) -> bytes:
-        ...
+        raise NotImplementedError
