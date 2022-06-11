@@ -2,9 +2,7 @@
 
 trying to edit msbt files for tomodachi life, its really annoying
 
-darctool used from: https://github.com/LITTOMA/darctool
+dependencies: `lxml`, `nlzss11`, `pygubu` (for gui editor) 
 
-nlzss used from: https://github.com/magical/nlzss
-
-make sure to run `git submodule init` and `git submodule update`
+make sure to run `git submodule init` and `git submodule update` if you want to build nlzs11 from source
 

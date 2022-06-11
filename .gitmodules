@@ -1,9 +1,3 @@
-[submodule "external/nlzss"]
-	path = external/nlzss
-	url = https://github.com/magical/nlzss.git
-[submodule "external/darctool"]
-	path = external/darctool
-	url = https://github.com/LITTOMA/darctool.git
 [submodule "external/nlzss11"]
 	path = external/nlzss11
 	url = https://github.com/lepelog/nlzss11.git
