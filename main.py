@@ -7,6 +7,7 @@ from base64 import b64encode, b64decode
 import argparse
 import enum
 
+import hexdump
 import lxml.etree
 import lxml.builder
 from lxml.etree import _Element as XMLElement
@@ -312,19 +313,39 @@ def test_main() -> int:
     for file, data in files["msbp"]:
         print(f"processing msbp file !{file}")
         p = LMSProjectFile.from_bytes(data)
-        # input("press a key")
+        try:
+            new = p.to_bytes()
+            assert new == data
+            print("[✓] Final MSBP")
+        except NotImplementedError:
+            print("[✗] Final MSBP (not implemented)")
+        except AssertionError:
+            print("[✗] Final MSBP (assert failed)")
+            hexdump.hexdump(new)
+            print("/\\new   old\\/")
+            hexdump.hexdump(data)
         print()
 
     # for file, data in files["msbt"]:
     #     print(f"processing msbt file !{file}")
     #     p = LMSStandardFile.from_bytes(data)
-    #     # input("press a key")
+    #     try:
+    #         assert p.to_bytes() == data
+    #     except NotImplementedError:
+    #         print("[✗] Final MSBT (not implemented)")
+    #     except AssertionError:
+    #         print("[✗] Final MSBT (assert failed)")
     #     print()
 
     # for file, data in files["msbf"]:
     #     print(f"processing msbf file !{file}")
     #     p = LMSFlowFile.from_bytes(data)
-    #     # input("press a key")
+    #     try:
+    #         assert p.to_bytes() == data
+    #     except NotImplementedError:
+    #         print("[✗] Final MSBF (not implemented)")
+    #     except AssertionError:
+    #         print("[✗] Final MSBF (assert failed)")
     #     print()
 
     return 0

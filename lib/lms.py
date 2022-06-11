@@ -31,10 +31,10 @@ def read_str(f: typing.BinaryIO, encoding: str, length: int = -1) -> str:
         return f.read(length * width).decode(encoding)
 
 
-def align_buf(f: typing.BinaryIO, n: int) -> int:
+def align_buf(f: typing.BinaryIO, n: int, fill: bytes = b"\x00") -> int:
     remain = f.tell() % n
     if remain > 0:
-        return f.write(b"\x00" * (n - remain))
+        return f.write(fill * (n - remain))
     return 0
 
 
@@ -775,8 +775,27 @@ class LMSFile:
         self.encoding = encoding
         self.raw_blocks = blocks
 
-    def _write_header(self) -> bytes:
-        raise NotImplementedError
+    def _write_header(self, f: typing.BinaryIO) -> None:
+        # ident
+        f.write(self.magic)
+        f.write(self.byte_order.bom)
+
+        # header data
+        encoding_num = 0
+        if self.encoding == "utf-8":
+            encoding_num = 0
+        elif self.encoding.startswith("utf-16"):
+            encoding_num = 1
+        elif self.encoding.startswith("utf-32"):
+            encoding_num = 2
+
+        f.write(self.byte_order.pack(
+            LMSFile.LMS_HEADER,
+            encoding_num,
+            LMSFile.LMS_VERSION,
+            len(self.blocks),
+            0,  # fill in filesize later
+        ))
 
     def _parse_blocks(self, types: Dict[str, Type[LMSBlock]]):
         unpacked_sections: Dict[str, LMSBlock] = {}
@@ -806,6 +825,28 @@ class LMSFile:
                     if debug_raise_errors:
                         raise
         self.blocks = unpacked_sections
+
+    def _write_blocks(self, f: typing.BinaryIO) -> None:
+        for block_type, block in self.blocks.items():
+            block_data = block.to_bytes()
+            f.write(self.byte_order.pack(
+                LMSFile.BLK_HEADER,
+                block_type.encode("ascii"),
+                len(block_data),
+            ))
+            f.write(block_data)
+            align_buf(f, 0x10, b"\xAB")
+
+    def to_bytes(self) -> bytes:
+        f = io.BytesIO()
+        self._write_header(f)
+        self._write_blocks(f)
+
+        size = f.tell()
+        f.seek(18, os.SEEK_SET)
+        f.write(self.byte_order.pack("I", size))
+
+        return f.getvalue()
 
 
 class LMSProjectFile(LMSFile):
@@ -840,9 +881,6 @@ class LMSProjectFile(LMSFile):
 
         return prj
 
-    def to_bytes(self) -> bytes:
-        raise NotImplementedError
-
 
 class LMSStandardFile(LMSFile):
     MAGIC: bytes = b"MsgStdBn"
@@ -867,9 +905,6 @@ class LMSStandardFile(LMSFile):
 
         return msg
 
-    def to_bytes(self) -> bytes:
-        raise NotImplementedError
-
 
 class LMSFlowFile(LMSFile):
     MAGIC: bytes = b"MsgFlwBn"
@@ -892,6 +927,3 @@ class LMSFlowFile(LMSFile):
         flw._parse_blocks(LMSFlowFile.SECTIONS)
 
         return flw
-
-    def to_bytes(self) -> bytes:
-        raise NotImplementedError
