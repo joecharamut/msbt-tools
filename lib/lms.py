@@ -3,7 +3,7 @@ import os
 import struct
 import io
 import typing
-from typing import Dict, Type
+from typing import Dict, Type, List, Any, Tuple
 
 import hexdump
 
@@ -600,6 +600,8 @@ class CTI1Block(LMSBlock):
 
 # Start of MSBT file raw_blocks
 class TXT2Block(LMSBlock):
+    messages: List[Tuple[str, List[Tuple[int, int, int]]]]
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
@@ -797,7 +799,7 @@ class LMSFile:
             0,  # fill in filesize later
         ))
 
-    def _parse_blocks(self, types: Dict[str, Type[LMSBlock]]):
+    def _parse_blocks(self, types: Dict[str, Type[LMSBlock]], debug: bool = False):
         unpacked_sections: Dict[str, LMSBlock] = {}
         for block_type, data in self.raw_blocks.items():
             if block_type not in types:
@@ -805,9 +807,8 @@ class LMSFile:
 
             unpacked_sections[block_type] = types[block_type].from_bytes(data, self)
 
-            debug_back_to_bytes = True
             debug_raise_errors = False
-            if debug_back_to_bytes:
+            if debug:
                 # todo debugging
                 try:
                     new = unpacked_sections[block_type].to_bytes()

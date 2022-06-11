@@ -2,13 +2,13 @@ import io
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 import pygubu
+import nlzss11
 
-from lib.msbt import Msbt
-
-from external.nlzss import lzss3
-from external.darctool.darc import Darc
+from lib.darc import Darc
+from lib.lms import LMSProjectFile, LMSStandardFile, LMSFlowFile, TXT2Block, HashTableBlock
 
 PROJECT_PATH = Path(__file__).parent
 PROJECT_UI = PROJECT_PATH / "editor.ui"
@@ -20,6 +20,7 @@ class EditorApp:
     file_tree: ttk.Treeview
     text_pane: tk.Text
     text_tab: ttk.Notebook
+    msbp_menu: tk.Menu
 
     def __init__(self) -> None:
         self.builder = builder = pygubu.Builder()
@@ -43,6 +44,9 @@ class EditorApp:
         self.text_pane = builder.get_object("text_editor_text")
         self.text_tab = builder.get_object("text_editor_tab")
 
+        self.msbp_menu = builder.get_object("msbp_action_menu")
+        self.msbp_tree = builder.get_object("project_tree")
+
     def run(self) -> None:
         self.main_window.mainloop()
 
@@ -62,7 +66,7 @@ class EditorApp:
         if filebytes[0] == 0x11:
             try:
                 print("decompressing lz11")
-                filebytes = lzss3.decompress_bytes(filebytes)
+                filebytes = nlzss11.decompress(filebytes)
             except Exception as e:
                 messagebox.showerror("Error opening file", str(e))
                 exit(1)
@@ -72,7 +76,7 @@ class EditorApp:
             messagebox.showerror("Error opening file", "Invalid DARC file magic")
             exit(1)
 
-        self.open_arc = arc = Darc.load(io.BytesIO(filebytes))
+        self.open_arc = arc = Darc.from_bytes(filebytes)
 
         print(arc)
 
@@ -81,11 +85,11 @@ class EditorApp:
 
         files = {}
         dirs = []
-        for entry in arc.flatentries:
-            if entry.isdir:
-                dirs.append(entry.fullpath)
-            if "." in entry.fullpath:
-                files[entry.fullpath] = entry.data
+        for entry in arc.entries():
+            if entry.is_dir:
+                dirs.append(entry.filepath)
+            else:
+                files[entry.filepath] = entry.data
 
         for d in dirs:
             if d:
@@ -104,11 +108,14 @@ class EditorApp:
         self.files = {}
         for file, data in files.items():
             if file.endswith(".msbt"):
-                self.files[file] = Msbt.from_bytes(data)
+                self.files[file] = LMSStandardFile.from_bytes(data)
 
         for file, msbt in self.files.items():
-            for i, entry in enumerate(msbt.txt2):
-                self.file_tree.insert(file, "end", iid=f"{file}!str_{i}", text=msbt.lbl1_indexed[i])
+            txt2: TXT2Block = msbt.blocks["TXT2"]
+            lbl1: HashTableBlock = msbt.blocks["LBL1"]
+            lbl1_idx = {v: k for k, v in lbl1.labels.items()}
+            for i, entry in enumerate(txt2.messages):
+                self.file_tree.insert(file, "end", iid=f"{file}!str_{i}", text=lbl1_idx[i])
 
     def callback_tree_select(self, event) -> None:
         sel = self.file_tree.selection()[0]
@@ -119,7 +126,8 @@ class EditorApp:
             if len(self.text_pane.get("1.0", tk.END)) > 0:
                 self.text_pane.delete("1.0", tk.END)
 
-            self.text_pane.insert("1.0", Msbt.decode_txt2_entry(self.files[file].txt2[str_num]))
+            txt2: TXT2Block = self.files[file].blocks["TXT2"]
+            self.text_pane.insert("1.0", txt2.messages[str_num][0])
 
 
 if __name__ == "__main__":

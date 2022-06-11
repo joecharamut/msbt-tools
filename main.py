@@ -271,6 +271,9 @@ def recompile_main(args: argparse.Namespace) -> int:
 
 
 def editor_main(args: argparse.Namespace) -> int:
+    import editor
+    app = editor.EditorApp()
+    app.run()
     return 0
 
 
