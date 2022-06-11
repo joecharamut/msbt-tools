@@ -65,6 +65,8 @@ class UnknownBlock(LMSBlock):
 
 
 class HashTableBlock(LMSBlock):
+    labels: dict[str, int]
+
     def __init__(self, num_slots: int, byte_order: ByteOrderType) -> None:
         self.num_slots = num_slots
         self.labels = {}
@@ -110,23 +112,22 @@ class HashTableBlock(LMSBlock):
         f.write(self.byte_order.pack("I", self.num_slots))
 
         slots = {x: [] for x in range(self.num_slots)}
-        for lbl in self.labels:
-            slots[HashTableBlock.hash(lbl, self.num_slots)].append(lbl)
+        for lbl, value in self.labels.items():
+            slots[HashTableBlock.hash(lbl, self.num_slots)].append((lbl, value))
 
         slots_start = f.tell()
         f.write(b"\x00" * self.num_slots * 8)
 
-        for k, v in slots.items():
+        for hash_val, labels in slots.items():
             pos = f.tell()
-            for lbl in v:
+            for lbl, val in labels:
                 f.write(self.byte_order.pack("B", len(lbl)))
                 f.write(lbl.encode("utf-8"))
-                f.write(b"\x00")
-                align_buf(f, 4)
+                f.write(self.byte_order.pack("I", val))
             end = f.tell()
 
-            f.seek(slots_start + (k * 8), os.SEEK_SET)
-            f.write(self.byte_order.pack("I I", len(v), pos))
+            f.seek(slots_start + (hash_val * 8), os.SEEK_SET)
+            f.write(self.byte_order.pack("I I", len(labels), pos))
             f.seek(end, os.SEEK_SET)
 
         return f.getvalue()
