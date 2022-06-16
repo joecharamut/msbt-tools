@@ -283,10 +283,12 @@ class ALI2Block(LMSBlock):
 
 
 class TGG2Block(LMSBlock):
+    groups: List[Tuple[str, List[int]]]
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
-        self.groups = {}
+        self.groups = []
 
     def __repr__(self) -> str:
         return f"<TGG2Block groups={self.groups!r}>"
@@ -295,7 +297,7 @@ class TGG2Block(LMSBlock):
     def from_bytes(data: bytes, lms_file: "LMSFile") -> "TGG2Block":
         f = io.BytesIO(data)
 
-        groups = {}
+        groups = []
         num_groups, = lms_file.byte_order.unpack("H 2x", f.read(4))
         for _ in range(num_groups):
             offset, = lms_file.byte_order.unpack("I", f.read(4))
@@ -307,7 +309,7 @@ class TGG2Block(LMSBlock):
                 i, = lms_file.byte_order.unpack("H", f.read(2))
                 tag_indexes.append(i)
             name = read_str(f, lms_file.encoding)
-            groups[name] = tag_indexes
+            groups.append((name, tag_indexes))
             f.seek(pos, os.SEEK_SET)
 
         blk = TGG2Block()
@@ -322,7 +324,7 @@ class TGG2Block(LMSBlock):
         f.write(self.byte_order.pack("H 2x", len(self.groups)))
         f.write(b"\x00" * 4 * len(self.groups))
 
-        for i, (group, tags) in enumerate(self.groups.items()):
+        for i, (group, tags) in enumerate(self.groups):
             group_pos = f.tell()
             f.seek(4 * (i + 1), os.SEEK_SET)
             f.write(self.byte_order.pack("I", group_pos))
@@ -339,6 +341,8 @@ class TGG2Block(LMSBlock):
 
 
 class TAG2Block(LMSBlock):
+    tags: List[Tuple[str, List[int]]]
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
@@ -395,6 +399,8 @@ class TAG2Block(LMSBlock):
 
 
 class TGP2Block(LMSBlock):
+    parameters: List[Tuple[str, int, List[int]]]
+
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
         self.encoding = encoding
@@ -600,7 +606,7 @@ class CTI1Block(LMSBlock):
 
 # Start of MSBT file raw_blocks
 class TXT2Block(LMSBlock):
-    messages: List[Tuple[str, List[Tuple[int, int, int]]]]
+    messages: List[Tuple[str, List[Tuple[int, int, bytes]]]]
 
     def __init__(self, byte_order: ByteOrderType = ByteOrder.LITTLE_ENDIAN, encoding: str = "utf-8") -> None:
         self.byte_order = byte_order
@@ -616,18 +622,32 @@ class TXT2Block(LMSBlock):
 
         messages = []
         num_messages, = lms_file.byte_order.unpack("I", f.read(4))
-        for _ in range(num_messages):
+        for i in range(num_messages):
             offset, = lms_file.byte_order.unpack("I", f.read(4))
             pos = f.tell()
             f.seek(offset, os.SEEK_SET)
 
             msg = ""
             tags = []
-            while (ch := read_char(f, lms_file.encoding)) != "\0":
+
+            width = len("A".encode(lms_file.encoding))
+            ch = None
+            while ch != "\0":
+                char_bytes = f.read(width)
+                ch = char_bytes.decode(lms_file.encoding)
+
+                if ch == "\0":
+                    break
+
                 if ch == "\x0E":
                     tag_group, tag_type, param_size = lms_file.byte_order.unpack("HHH", f.read(6))
                     param_data = f.read(param_size)
                     tags.append((tag_group, tag_type, param_data))
+                    msg += "￼"
+                elif b"\xE0" in char_bytes:
+                    # seems to be xx E0 for a button label (shorthand?)
+                    button = char_bytes.replace(b"\xE0", b"")
+                    tags.append((-1, -1, button))
                     msg += "￼"
                 else:
                     msg += ch
@@ -882,6 +902,22 @@ class LMSProjectFile(LMSFile):
 
         return prj
 
+    @property
+    def tgg2(self) -> TGG2Block:
+        return self.blocks["TGG2"]
+
+    @property
+    def tag2(self) -> TAG2Block:
+        return self.blocks["TAG2"]
+
+    @property
+    def tgp2(self) -> TGP2Block:
+        return self.blocks["TGP2"]
+
+    @property
+    def tgl2(self) -> TGL2Block:
+        return self.blocks["TGL2"]
+
 
 class LMSStandardFile(LMSFile):
     MAGIC: bytes = b"MsgStdBn"
@@ -905,6 +941,18 @@ class LMSStandardFile(LMSFile):
         msg._parse_blocks(LMSStandardFile.SECTIONS)
 
         return msg
+
+    @property
+    def lbl1(self) -> HashTableBlock:
+        return self.blocks["LBL1"]
+
+    @property
+    def txt2(self) -> TXT2Block:
+        return self.blocks["TXT2"]
+
+    @property
+    def atr1(self) -> UnknownBlock:
+        return self.blocks["ATR1"]
 
 
 class LMSFlowFile(LMSFile):

@@ -18,29 +18,8 @@ from lib.lms import LMSProjectFile, LMSStandardFile, LMSFlowFile
 from lib.msbt import Msbt
 from lib.darc import Darc, DarcEntry
 from lib.buffer import ByteBuffer
-
-
-class AutoFileType(enum.Enum):
-    UNKNOWN_FILE = enum.auto()
-    MSBT_FILE = enum.auto()
-    MSBP_FILE = enum.auto()
-    MSBF_FILE = enum.auto()
-    DARC_FILE = enum.auto()
-    LZ11_FILE = enum.auto()
-
-
-def guess_file_type(data: bytes) -> AutoFileType:
-    if data[0] == 0x11:
-        return AutoFileType.LZ11_FILE
-    if data[0:4] == b"darc":
-        return AutoFileType.DARC_FILE
-    if data[0:8] == b"MsgStdBn":
-        return AutoFileType.MSBT_FILE
-    if data[0:8] == b"MsgPrjBn":
-        return AutoFileType.MSBP_FILE
-    if data[0:8] == b"MsgFlwBn":
-        return AutoFileType.MSBF_FILE
-    return AutoFileType.UNKNOWN_FILE
+from lib.filetype import FileType
+from lib.oms import OMSProject
 
 
 def replace_extension(file: str, ext: str) -> str:
@@ -196,6 +175,86 @@ def xml_to_darc(root: XMLElement, output: io.BytesIO) -> Darc:
     return arc
 
 
+def new_msbt_to_xml(project: LMSProjectFile, msbt: LMSStandardFile, filename: str = "") -> XMLElement:
+    from lxml.etree import Element as E, SubElement as SE
+    container = E("MessageText", encoding=msbt.encoding, byte_order=msbt.byte_order.suffix, file=filename)
+
+    lbl = msbt.lbl1
+    txt = msbt.txt2
+
+    id_to_label = {v: k for k, v in lbl.labels.items()}
+
+    for i, (text, tags) in enumerate(txt.messages):
+        label = id_to_label[i]
+        entry = SE(container, "TextEntry", label=label)
+        element = toplevel = SE(entry, "Text")
+        element.text = ""
+
+        inline = False
+        for c in text:
+            if c == "￼":
+                tag_group, tag_type, params = tags.pop(0)
+
+                if tag_group == -1:
+                    if tag_type == -1:
+                        group_name = "__custom__"
+                        tag_name = "Buttons"
+                        button = params[0]
+                else:
+                    group_name, group_tags = project.tgg2.groups[tag_group]
+                    tag_name = project.tag2.tags[group_tags[tag_type]][0]
+
+                element = SE(toplevel, "Tag", group=group_name, tag=tag_name, params=params.hex(' '))
+                inline = True
+                element.tail = ""
+            else:
+                if 0 <= ord(c) <= 9 or 11 <= ord(c) <= 31:
+                    c = "�"
+                    print(f"Warning: unrepresentable character in stream (msg {i} lbl {label} txt {text!r} chr {c!r})")
+
+                if not inline:
+                    element.text += c
+                else:
+                    element.tail += c
+
+    return container
+
+
+def new_darc_to_xml(arc: Darc, compressed: bool = False) -> XMLElement:
+    from lxml.etree import Element as E, SubElement as SE
+    container = E("MessagesContainer", compressed=str(compressed), container="darc")
+
+    files = {}
+    for entry in arc.entries():
+        if not entry.is_dir:
+            files[entry.filepath] = entry.data
+
+    print("Looking for project file...")
+    project = None
+    for file, data in files.items():
+        if file.endswith(".msbp"):
+            print(f"Loading project data...")
+            project = LMSProjectFile.from_bytes(data)
+
+    if not project:
+        raise TypeError("Input file not in expected format")
+
+
+
+    for file, data in files.items():
+        if file.endswith(".msbt"):
+            print(f"processing msbt file !{file}")
+            msg = LMSStandardFile.from_bytes(data)
+            node = new_msbt_to_xml(project, msg, file)
+            container.append(node)
+        else:
+            print(f"including file !{file} as raw data")
+            raw_data = SE(container, "RawDataFile", path=file)
+            raw_data.text = b64encode(data).decode()
+
+    return container
+
+
 def decompile_main(args: argparse.Namespace) -> int:
     in_file = args.input
     out_file = args.output
@@ -205,25 +264,29 @@ def decompile_main(args: argparse.Namespace) -> int:
     with open(in_file, "rb") as f:
         in_data = f.read()
 
-    file_type = guess_file_type(in_data)
+    oms = OMSProject()
+    oms.import_binary_project(in_data)
+    return 1
+
+    file_type = FileType.guess(in_data)
 
     was_compressed = False
-    if file_type == AutoFileType.LZ11_FILE:
+    if file_type == FileType.LZ11_FILE:
         was_compressed = True
         in_data = bytes(nlzss11.decompress(in_data))
-        file_type = guess_file_type(in_data)
+        file_type = FileType.guess(in_data)
 
-    if file_type == AutoFileType.DARC_FILE:
+    if file_type == FileType.DARC_FILE:
         print("darc file")
         arc = Darc.from_bytes(in_data)
-        root = darc_to_xml(arc, was_compressed)
+        root = new_darc_to_xml(arc, was_compressed)
 
         print(f"writing {out_file}")
         with open(out_file, "wb") as f:
             f.write(lxml.etree.tostring(root, pretty_print=True, encoding="utf-8"))
         return 0
 
-    if file_type == AutoFileType.MSBT_FILE:
+    if file_type == FileType.MSBT_FILE:
         print("msbt file")
         msbt = Msbt.from_bytes(in_data, True)
         root = msbt_to_xml(msbt, in_file.split("/")[-1])
