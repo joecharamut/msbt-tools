@@ -55,8 +55,6 @@ class OMSText:
                 group = project.tag_groups[group_index]
                 tag = group.tags[tag_index]
 
-                tag_parameter_names = ";".join([p.name for p in tag.parameters])
-
                 output_tags.append((group, tag, param_data))
                 text += "{" + str(output_index) + "}"
                 output_index += 1
@@ -71,12 +69,14 @@ class OMSProject:
     tags: List[Tag]
     tag_groups: List[TagGroup]
     messages: Dict[str, OMSText]
+    tag_lists = List[str]
 
     def __init__(self) -> None:
         self.tag_parameters = []
         self.tags = []
         self.tag_groups = []
         self.messages = {}
+        self.tag_lists = []
 
     def import_binary_project(self, data: bytes) -> None:
         file_type = FileType.guess(data)
@@ -125,6 +125,11 @@ class OMSProject:
         for group_name, group_tags in msbp.tgg2.groups:
             groups.append(TagGroup(group_name, [tags[x] for x in group_tags]))
         self.tag_groups = groups
+
+        lists = []
+        for list_name in msbp.tgl2.names:
+            lists.append(list_name)
+        self.tag_lists = lists
 
     def _import_msbt(self, path: str, msbt: LMSStandardFile) -> None:
         txt = OMSText()

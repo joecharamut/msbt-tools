@@ -2,3 +2,5 @@ env
 .idea
 test
 .mypy_cache
+__pycache__
+

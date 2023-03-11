@@ -169,8 +169,24 @@ class EditorApp:
             param_data_buf = io.BytesIO(param_data)
             for j, p in enumerate(tag.parameters):
                 param_val = None
+
                 if p.type == 0:
                     param_val, = struct.unpack("B", param_data_buf.read(1))
+                elif p.type == 8:
+                    pass
+                    # if len(len_buf := param_data_buf.read(2)) > 0:
+                    #     string_len, = struct.unpack("H", len_buf)
+                    #     param_val = ""
+                    #     for _ in range(string_len):
+                    #         param_val += param_data_buf.read(2).decode("utf-16")
+                elif p.type == 9:
+                    param_val = "["
+                    for num, name_index in enumerate(p.items):
+                        if num > 0:
+                            param_val += ", "
+                        param_val += f"\"{self.open_prj.tag_lists[name_index]}\""
+                    param_val += "]"
+
 
                 if j > 0:
                     param_str += "; "
